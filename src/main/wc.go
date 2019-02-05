@@ -41,7 +41,7 @@ func reduceF(key string, values []string) string {
 		count, _ := strconv.Atoi(v)
 		sum += count
 	}
-	fmt.Printf("[REDUCE] %s, %d\n", key, sum)
+	//fmt.Printf("[REDUCE] %s, %d\n", key, sum)
 	return strconv.Itoa(sum)
 }
 
