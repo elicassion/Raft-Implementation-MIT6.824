@@ -1,5 +1,10 @@
 package mapreduce
 
+import (
+	"container/list"
+	"os"
+	"sort"
+)
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
@@ -44,4 +49,30 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
+
+	kvList := make([]KeyValue, 0)
+	counter := 0
+	for m := 0; m < nMap; m++{
+		inFile := os.Open(reduceName(jobName, m, reduceTask))
+		dec := json.NewDecoder(inFile)
+		for {
+			var kv KeyValue
+			err := dec.Decode(&kv)
+			if err != nil{
+				break
+			}
+			counter++
+			kvList = append(kvList, kv)
+		}
+	}
+
+
+	sort.Slice(kvList, func(i, j int) bool {
+		return kvList[i].Key < kvList[j].Key
+	})
+
+	//TODO: aggregate values from the same key
+	//TODO: call reduceF()
+	//TODO: gather the result and output
+
 }
