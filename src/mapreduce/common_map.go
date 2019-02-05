@@ -1,6 +1,7 @@
 package mapreduce
 
 import (
+	"encoding/json"
 	"hash/fnv"
 	"io/ioutil"
 	"os"
@@ -60,22 +61,23 @@ func doMap(
 	inFileContent, _ := ioutil.ReadFile(inFile)
 
 	// Call user-defined mapF and get the result, []KeyValue
-	mappedResult := mapF(inFile, inFileContent)
+	mappedResult := mapF(inFile, string(inFileContent))
 
 	// Create files for reduce
-	var filesForReduce [nReduce] *os.File
+	filesForReduce := make([]*json.Encoder, 0)
 	for i := 0; i < nReduce; i++ {
-		f := os.Create(reduceName(jobName, mapTask, i))
-		filesForReduce[i] = json.NewEncoder(f)
+		f, _ := os.Create(reduceName(jobName, mapTask, i))
+		filesForReduce = append(filesForReduce, json.NewEncoder(f))
+		//filesForReduce[i] = json.NewEncoder(f)
 		defer f.Close()
 	}
 
 
 	// Partition into nReduce files
 	for _, item := range mappedResult{
-		k := item.key
+		k := item.Key
 		keyHashed := ihash(k) % nReduce
-		err := filesForReduce[keyHashed].Encode(&item)
+		filesForReduce[keyHashed].Encode(&item)
 	}
 }
 

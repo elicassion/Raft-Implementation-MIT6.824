@@ -1,9 +1,10 @@
 package mapreduce
 
 import (
-	"container/list"
+	"encoding/json"
 	"os"
 	"sort"
+	"strings"
 )
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
@@ -53,7 +54,7 @@ func doReduce(
 	kvList := make([]KeyValue, 0)
 	counter := 0
 	for m := 0; m < nMap; m++{
-		inFile := os.Open(reduceName(jobName, m, reduceTask))
+		inFile, _ := os.Open(reduceName(jobName, m, reduceTask))
 		dec := json.NewDecoder(inFile)
 		for {
 			var kv KeyValue
@@ -71,8 +72,34 @@ func doReduce(
 		return kvList[i].Key < kvList[j].Key
 	})
 
-	//TODO: aggregate values from the same key
-	//TODO: call reduceF()
-	//TODO: gather the result and output
+
+
+
+
+	// Create output file
+	outFp, _ := os.Create(outFile)
+	enc := json.NewEncoder(outFp)
+
+	// Aggregate values from the same key and call reduceF
+	tmpK := kvList[0].Key
+	vWithSameKey := make([]string, 0)
+	vWithSameKey = append(vWithSameKey, kvList[0].Value)
+	for _, item := range kvList {
+		if strings.Compare(tmpK, item.Key) == 0{
+			vWithSameKey = append(vWithSameKey, item.Value)
+		} else {
+			// Write to the output file
+			enc.Encode(KeyValue{tmpK, reduceF(tmpK, vWithSameKey)})
+			tmpK = item.Key
+			vWithSameKey := make([]string, 0)
+			vWithSameKey = append(vWithSameKey, item.Value)
+		}
+	}
+	// The last key
+	if len(vWithSameKey) > 0 {
+		enc.Encode(KeyValue{tmpK, reduceF(tmpK, vWithSameKey)})
+	}
+	outFp.Close()
+
 
 }

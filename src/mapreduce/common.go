@@ -31,13 +31,6 @@ type KeyValue struct {
 	Value string
 }
 
-type ByKey []KeyValue
-
-func (a ByKey) Len() int           { return len(a) }
-func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByKey) Less(i, j int) bool { return strings.Compare(a[i].Key, a[j].Key) }
-
-
 // reduceName constructs the name of the intermediate file which map task
 // <mapTask> produces for reduce task <reduceTask>.
 func reduceName(jobName string, mapTask int, reduceTask int) string {
