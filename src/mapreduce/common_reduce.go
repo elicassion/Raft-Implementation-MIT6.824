@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"encoding/json"
+	//"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -73,9 +74,6 @@ func doReduce(
 	})
 
 
-
-
-
 	// Create output file
 	outFp, _ := os.Create(outFile)
 	enc := json.NewEncoder(outFp)
@@ -84,14 +82,14 @@ func doReduce(
 	tmpK := kvList[0].Key
 	vWithSameKey := make([]string, 0)
 	vWithSameKey = append(vWithSameKey, kvList[0].Value)
-	for _, item := range kvList {
-		if strings.Compare(tmpK, item.Key) == 0{
+	for _, item := range kvList[1:] {
+		if strings.Compare(tmpK, item.Key) == 0 {
 			vWithSameKey = append(vWithSameKey, item.Value)
 		} else {
 			// Write to the output file
 			enc.Encode(KeyValue{tmpK, reduceF(tmpK, vWithSameKey)})
 			tmpK = item.Key
-			vWithSameKey := make([]string, 0)
+			vWithSameKey = vWithSameKey[:0]
 			vWithSameKey = append(vWithSameKey, item.Value)
 		}
 	}
