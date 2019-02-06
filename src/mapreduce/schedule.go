@@ -35,30 +35,27 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	counter := 0
 	var wg sync.WaitGroup
-	//var isRunning chan string
-	//workerNumber := len(registerChan)
 	for {
-		fmt.Printf("Looping\n")
 		if counter == ntasks{
 			break
 		}
-		workerAddress := <- registerChan
-		fmt.Printf("[Read From Chan] %s, Try to Assign %d\n", workerAddress, counter)
+		workerAddress := <-registerChan
+		fmt.Printf("LOL\n")
 		wg.Add(1)
-		go func(taskNum int) {
+		go func(taskNum int, wAddr string) {
 			defer wg.Done()
-			err := call(workerAddress, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[taskNum], phase, taskNum, n_other}, nil)
+			call(wAddr, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[taskNum], phase, taskNum, n_other}, nil)
 			// successfully called
-			if err {
-				registerChan <- workerAddress
+			// if tasks remain, re-register the worker
+			// i.e re-claim the worker is available
+			if counter != ntasks {
+				registerChan <- wAddr
 			}
-			fmt.Printf("In go routine\n")
-		}(counter)
+		}(counter, workerAddress)
 		counter += 1
 	}
 
 	wg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
 
-	//return
 }
