@@ -40,16 +40,21 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 			break
 		}
 		workerAddress := <-registerChan
-		fmt.Printf("LOL\n")
 		wg.Add(1)
 		go func(taskNum int, wAddr string) {
 			defer wg.Done()
-			call(wAddr, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[taskNum], phase, taskNum, n_other}, nil)
+			err := call(wAddr, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[taskNum], phase, taskNum, n_other}, nil)
 			// successfully called
 			// if tasks remain, re-register the worker
 			// i.e re-claim the worker is available
-			if counter != ntasks {
-				registerChan <- wAddr
+			for !bool(err) {
+				wAddr = <-registerChan
+				err = call(wAddr, "Worker.DoTask", DoTaskArgs{jobName, mapFiles[taskNum], phase, taskNum, n_other}, nil)
+			}
+			if err {
+				if counter != ntasks {
+					registerChan <- wAddr
+				}
 			}
 		}(counter, workerAddress)
 		counter += 1
