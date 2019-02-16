@@ -1,9 +1,11 @@
 package mapreduce
 
 import (
+	"bufio"
 	"encoding/json"
 	"hash/fnv"
-	"io/ioutil"
+	"io"
+	//"io/ioutil"
 	"os"
 )
 
@@ -57,11 +59,6 @@ func doMap(
 	// Your code here (Part I).
 	//
 
-	// Read file
-	inFileContent, _ := ioutil.ReadFile(inFile)
-
-	// Call user-defined mapF and get the result, []KeyValue
-	mappedResult := mapF(inFile, string(inFileContent))
 
 	// Create files for reduce
 	filesForReduce := make([]*json.Encoder, 0)
@@ -72,13 +69,32 @@ func doMap(
 		defer f.Close()
 	}
 
-
-	// Partition into nReduce files
-	for _, item := range mappedResult{
-		k := item.Key
-		keyHashed := ihash(k) % nReduce
-		filesForReduce[keyHashed].Encode(&item)
+	// Read file
+	//inFileContent, _ := ioutil.ReadFile(inFile)
+	inFp, err := os.Open(inFile)
+	if err != nil {
+		panic(err)
 	}
+	defer inFp.Close()
+
+	inFileReader := bufio.NewReader(inFp)
+	for {
+		line, err := inFileReader.ReadString('\n')
+		if err != nil || err == io.EOF {
+			break
+		}
+		// Call user-defined mapF and get the result, []KeyValue
+		mappedResult := mapF(inFile, string(line))
+
+		// Partition into nReduce files
+		for _, item := range mappedResult{
+			k := item.Key
+			keyHashed := ihash(k) % nReduce
+			filesForReduce[keyHashed].Encode(&item)
+		}
+	}
+
+
 }
 
 func ihash(s string) int {
