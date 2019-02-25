@@ -19,6 +19,9 @@ package raft
 
 import "sync"
 import "labrpc"
+import (
+	"math/rand"
+)
 
 // import "bytes"
 // import "labgob"
@@ -45,6 +48,20 @@ type ApplyMsg struct {
 //
 // A Go object implementing a single Raft peer.
 //
+
+type Log struct{
+	term	int
+	index	int
+	command interface{}
+}
+
+type State int
+const (
+	FOLLWER State = iota
+	CANDIDATE
+	LEADER
+)
+
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
@@ -54,8 +71,22 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	currentTerm		int
+	votedFor		int
+	logs			[]Log
 
+	commitIndex		int
+	lastApplied 	int
+
+	nextIndex		[]int
+	matchIndex		[]int
+
+	state			State
+
+	heartbeatChan	chan bool
 }
+
+
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -64,7 +95,17 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	term = rf.currentTerm
+	isleader = rf.state == LEADER
 	return term, isleader
+}
+
+func (rf *Raft) getLastIndex() int {
+	return len(rf.logs) - 1
+}
+
+func (rf *Raft) getLastTerm() int {
+	return rf.logs[len(rf.logs) - 1].term
 }
 
 
@@ -114,8 +155,14 @@ func (rf *Raft) readPersist(data []byte) {
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
+const NOT_VOTE = -1
+
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	term		int
+	candidateId		int
+	lastLogIndex	int
+	lastLogTerm		int
 }
 
 //
@@ -124,6 +171,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	term	int
+	voteGranted	bool
 }
 
 //
@@ -131,6 +180,44 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	reply.voteGranted = false
+
+	if args.term < rf.currentTerm {
+		reply.term = rf.currentTerm
+		return
+	}
+	if args.term > rf.currentTerm {
+		rf.votedFor = NOT_VOTE
+		rf.state = FOLLWER
+		rf.currentTerm = args.term
+	}
+
+	if rf.votedFor == NOT_VOTE || rf.votedFor == args.candidateId {
+		if  args.lastLogTerm > rf.getLastTerm() ||
+			(args.lastLogTerm == rf.getLastTerm() && args.lastLogIndex >= rf.getLastIndex()) {
+			reply.voteGranted = true
+			reply.term = rf.currentTerm
+			rf.votedFor = args.candidateId
+			rf.state = FOLLWER
+			return
+		}
+	}
+}
+
+
+func (rf *Raft) switchToLeader() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	// init records for followers
+	nextIndex = len(rf.logs)
+	for i := range rf.peers{
+		rf.nextIndex[i] = nextIndex
+		rf.matchIndex[i] = 0
+	}
+	rf.heartbeat()
 }
 
 //
@@ -167,6 +254,16 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+func (rf *Raft) heartbeat() {
+	if rf.state != LEADER { return }
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	for i := range rf.peers{
+		if i == rf.me { continue}
+		prevLogIndex :=
+	}
+}
+
 
 //
 // the service using Raft (e.g. a k/v server) wants to start
@@ -191,6 +288,31 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 
 	return index, term, isLeader
+}
+
+type AppendEntriesArgs struct {
+	term			int
+	leaderID		int
+	prevLogIndex	int
+	prevLogTerm		int
+	entries			[]Log
+	leaderCommit	int
+}
+
+type AppendEntriesReply struct {
+	term	int
+	success bool
+}
+
+func (rf *Raft) AppendEntries(args AppendEntriesArgs) (int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	//success := false
+	//if term < rf.currentTerm {
+	//	return rf.currentTerm, false
+	//}
+	//if
+	return rf.currentTerm, true
 }
 
 //
@@ -222,10 +344,40 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.logs = []Log{{term: 0}}
+	rf.votedFor = NOT_VOTE
+	rf.state = FOLLWER
+
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
+
+	rf.heartbeatChan = make(chan bool)
+	rf.electionChan = make(chan bool)
+
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
+	go rf.setElectTimeOut()
 
 	return rf
+}
+
+func (rf *Raft) setElectTimeOut() {
+	switch rf.state {
+	case FOLLWER:
+		select {
+			case <- rf.heartbeatChan:
+			case <- rf.timeoutChan:
+				rf.state = CANDIDATE
+		}
+	case CANDIDATE:
+		rf.startElection()
+		select {
+			case <- timeoutChan:
+			case <- rf.heartbeatChan:
+			case <- rf.electionChan:
+				rf.switchToLeader()
+		}
+	}
 }
