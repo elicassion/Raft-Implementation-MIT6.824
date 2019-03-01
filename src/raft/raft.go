@@ -467,8 +467,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 }
 
 func (rf *Raft) setElectTimeOut() {
+	mu.Lock()
+	defer mu.Unlock()
+	time.Duration timeout = 500
 	switch rf.state {
 	case FOLLWER:
+		go func() {
+			time.Sleep(timeout)
+			mu.Lock()
+			switchToCandidate()
+			mu.Unlock()
+		}
 		select {
 		case <-rf.heartbeatChan:
 		case <-rf.timeoutChan:
