@@ -348,7 +348,6 @@ func (rf *Raft) heartbeat() {
 		if i == rf.me {
 			continue
 		}
-
 		prevLogIndex := min(rf.getLastIndex(), rf.nextIndex[i])
 		prevLogTerm := rf.logs[prevLogIndex].term
 		entriesArgs := AppendEntriesArgs{
@@ -359,7 +358,7 @@ func (rf *Raft) heartbeat() {
 			make([]Log, len(rf.Logs[prevLogIndex+1:])),
 			rf.commitIndex,
 		}
-		copy(args.entries, rf.logs[prevLogIndex+1:])
+		copy(entriesArgs.entries, rf.logs[prevLogIndex+1:])
 		go func(i int, entriesArgs AppendEntriesArgs) {
 			reply := &AppendEntriesReply{}
 			resp := rf.sendAppendEntries(i, &entriesArgs, reply)
@@ -461,36 +460,36 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	go rf.setElectTimeOut()
-
+	go rf.setTimeouts()
 	return rf
 }
 
-func (rf *Raft) setElectTimeOut() {
-	mu.Lock()
-	defer mu.Unlock()
-	time.Duration timeout = 500
-	switch rf.state {
-	case FOLLWER:
-		go func() {
-			time.Sleep(timeout)
-			mu.Lock()
-			switchToCandidate()
-			mu.Unlock()
-		}
-		select {
-		case <-rf.heartbeatChan:
-		case <-rf.timeoutChan:
-			rf.state = CANDIDATE
-		}
-	case CANDIDATE:
-		rf.startElection()
-		select {
-		case <-timeoutChan:
-		case <-rf.heartbeatChan:
-		case <-rf.electionChan:
-			rf.switchToLeader()
+func (rf *Raft) setTimeouts() {
+	HEARTBEAT_TIMEOUT = 150
+	for {
+		ELECTION_TIMEOUT = time.Duration((rand.Intn(150)+250)*1000)
+		switch rf.state {
+			case FOLLWER:
+				select {
+					case <- rf.heartbeatChan:
+					case <- time.After(ELECTION_TIMEOUT):
+						rf.state = CANDIDATE	
+				}
+			case CANDIDATE：
+				rf.startElection()
+				select {
+					case <- rf.heartbeatChan:
+						rf.checkAnotherLeader()
+					case <- rf.winElectionChan:
+						rf.switchToLeader()
+					case <- time.After(ELECTION_TIMEOUT):
+						// randomly sleep
+				}
+			case LEADER:
+				select {
+					case <- time.After(HEARTBEAT_TIMEOUT):
+						rf.heartbeat()
+				}
 		}
 	}
-	time.Sleep(ELECTTIMEOUT)
 }
