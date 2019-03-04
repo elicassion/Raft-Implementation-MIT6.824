@@ -287,7 +287,7 @@ func (rf *Raft) startElection() {
 		rf.getLastIndex(),
 		rf.getLastTerm(),
 	}
-	fmt.Printf("%d Term %d Hold Election [Peers = %d]\n", rf.me, rf.currentTerm, len(rf.peers))
+	// fmt.Printf("%d Term %d Hold Election [Peers = %d]\n", rf.me, rf.currentTerm, len(rf.peers))
 	rf.mu.Unlock()
 	for i := range rf.peers {
 		if i == rf.me {
@@ -304,12 +304,12 @@ func (rf *Raft) startElection() {
 			requestVoteReply := RequestVoteReply{}
 			// fmt.Printf("[Send Vote Req to %d] Candidate: %d, Term: %d\n", server, rf.me, requestVoteArgs.Term)
 			resp := rf.sendRequestVote(server, &requestVoteArgs, &requestVoteReply)
-			fmt.Printf("[Reqest Vote Status from %d] %t\n", server, resp)
+			// fmt.Printf("[Reqest Vote Status from %d] %t\n", server, resp)
 			if resp {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 				// if state changed, abort
-				fmt.Printf("[Request Vote Reply Info] Peer: %d, Term: %d, Granted: %t\n", server, requestVoteReply.Term, requestVoteReply.VoteGranted)
+				// fmt.Printf("[Request Vote Reply Info] Peer: %d, Term: %d, Granted: %t\n", server, requestVoteReply.Term, requestVoteReply.VoteGranted)
 				if rf.state != CANDIDATE || rf.currentTerm != requestVoteArgs.Term {
 					//rf.mu.Unlock()
 					return
@@ -324,8 +324,8 @@ func (rf *Raft) startElection() {
 				}
 				if requestVoteReply.VoteGranted {
 					rf.recvVoteNum++
-					fmt.Printf("[%d Recv Vote from %d] Term: %d, Recv Vote Num: %d\n", rf.me, server, requestVoteReply.Term, rf.recvVoteNum)
-					if rf.recvVoteNum > (len(rf.peers)-1)/2 {
+					// fmt.Printf("[%d Recv Vote from %d] Term: %d, Recv Vote Num: %d\n", rf.me, server, requestVoteReply.Term, rf.recvVoteNum)
+					if rf.recvVoteNum > len(rf.peers)/2 {
 						//rf.mu.Unlock()
 						rf.electionChan <- true
 					}
@@ -457,8 +457,9 @@ func (rf *Raft) performCommit() {
 	// fmt.Printf("[%d][Perform Commit]\n", rf.me)
 	willCommitted := 0
 	for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
-		agreeNum := 0
+		agreeNum := 1
 		for j := range rf.peers {
+			if (j == rf.me) { continue }
 			// check match
 			indexMatch := rf.matchIndex[j] >= i
 			// a leader is only allowed to commit logs from current term
@@ -466,7 +467,7 @@ func (rf *Raft) performCommit() {
 			if indexMatch && termMatch {
 				agreeNum++
 			}
-			if agreeNum > (len(rf.peers)-1)/2 {
+			if agreeNum > (len(rf.peers))/2 {
 				willCommitted++
 				break
 			}
@@ -509,8 +510,8 @@ func (rf *Raft) heartbeat() {
 			make([]Log, len(rf.logs[prevLogIndex+1:])),
 			rf.commitIndex,
 		}
-		// fmt.Printf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d ",
-		// 	rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(rf.logs[prevLogIndex+1:]), rf.commitIndex)
+		// fmt.Printf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d, matchIndex: %d \n",
+		// 	rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(rf.logs[prevLogIndex+1:]), rf.commitIndex, rf.matchIndex[i])
 		copy(entriesArgs.Entries, rf.logs[prevLogIndex+1:])
 		// fmt.Printf("[Entries] ")
 		// for j := range entriesArgs.Entries {
@@ -676,11 +677,11 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 }
 
 func (rf *Raft) setTimeouts() {
-	HEARTBEAT_TIMEOUT := time.Duration(150 * time.Millisecond)
+	HEARTBEAT_TIMEOUT := time.Duration(180 * time.Millisecond)
 	// OP_TIMEOUT := time.Duration(1000*1000*1000)
 	for {
 		//timeoutflag := rand.Intn(66)
-		ELECTION_TIMEOUT := time.Duration((rand.Intn(250) + 200) * 1000 * 1000)
+		ELECTION_TIMEOUT := time.Duration((rand.Intn(150) + 250) * 1000 * 1000)
 		// fmt.Printf("fffffff\n")
 		rf.mu.Lock()
 		curState := rf.state
@@ -724,7 +725,8 @@ func (rf *Raft) setTimeouts() {
 				rf.switchToLeader()
 				// randomly sleep
 			case <-time.After(ELECTION_TIMEOUT):
-				fmt.Printf("[Ele Timeout] %d\n", rf.me)
+				time.Sleep(10*time.Millisecond)
+				// fmt.Printf("[Ele Timeout] %d\n", rf.me)
 				// rf.startElection()
 			// case <-rf.killChan:
 			// 	fmt.Printf("[Recv Kill %d]\n", rf.me)
