@@ -302,7 +302,7 @@ func (rf *Raft) startElection() {
 
 		go func(server int, requestVoteArgs RequestVoteArgs) {
 			requestVoteReply := RequestVoteReply{}
-			fmt.Printf("[Send Vote Req to %d] Candidate: %d, Term: %d\n", server, rf.me, requestVoteArgs.Term)
+			// fmt.Printf("[Send Vote Req to %d] Candidate: %d, Term: %d\n", server, rf.me, requestVoteArgs.Term)
 			resp := rf.sendRequestVote(server, &requestVoteArgs, &requestVoteReply)
 			fmt.Printf("[Reqest Vote Status from %d] %t\n", server, resp)
 			if resp {
@@ -398,10 +398,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// copy
 	rf.logs = append(rf.logs[:args.PrevLogIndex+1], args.Entries...)
+	// fmt.Printf("[Log Len] %d\n", len(rf.logs))
+	// fmt.Printf("[Log Entries] ")
+	// for j := range rf.logs {
+	// 	fmt.Printf("%v ", rf.logs[j].Command)
+	// }
+	// fmt.Printf("\n")
+
 
 	// leader push commit
 	if rf.commitIndex < args.LeaderCommit {
 		rf.commitIndex = min(rf.getLastIndex(), args.LeaderCommit)
+		rf.commitChan <- true
+		fmt.Printf("[%d][Leader Push Commit] commitedI: %d\n", rf.me, rf.commitIndex)
 	}
 	reply.Success = true
 	// fmt.Printf("[%d][Copy Log Suc] prevlogindex %d afterappendlength %d \n",
@@ -445,7 +454,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 //
 
 func (rf *Raft) performCommit() {
-	fmt.Printf("[%d][Perform Commit]\n", rf.me)
+	// fmt.Printf("[%d][Perform Commit]\n", rf.me)
 	willCommitted := 0
 	for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
 		agreeNum := 0
@@ -459,13 +468,14 @@ func (rf *Raft) performCommit() {
 			}
 			if agreeNum > (len(rf.peers)-1)/2 {
 				willCommitted++
+				break
 			}
 		}
 	}
 	if willCommitted > 0 {
-		fmt.Printf("[%d][%d Commited]\n", rf.me, willCommitted)
 		rf.commitChan <- true
 		rf.commitIndex += willCommitted
+		fmt.Printf("[%d][%d Commited][%d -> %d]\n", rf.me, willCommitted, rf.commitIndex-willCommitted, rf.commitIndex)
 	}
 
 }
@@ -499,7 +509,14 @@ func (rf *Raft) heartbeat() {
 			make([]Log, len(rf.logs[prevLogIndex+1:])),
 			rf.commitIndex,
 		}
+		// fmt.Printf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d ",
+		// 	rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(rf.logs[prevLogIndex+1:]), rf.commitIndex)
 		copy(entriesArgs.Entries, rf.logs[prevLogIndex+1:])
+		// fmt.Printf("[Entries] ")
+		// for j := range entriesArgs.Entries {
+		// 	fmt.Printf("%v ", entriesArgs.Entries[j].Command)
+		// }
+		// fmt.Printf("\n")
 		rf.mu.Unlock()
 		go func(server int, entriesArgs AppendEntriesArgs) {
 			//fmt.Printf("[Send HB from %d %d] length %d -> %d | r%d\n",
@@ -518,20 +535,17 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 	defer rf.mu.Unlock()
 
 	if rf.state != LEADER {
-		//rf.mu.Unlock()
 		return
 	}
 
 	//term fall back
 	//switch to and initialize as follower
 	if rf.currentTerm < reply.Term {
-		//rf.switchToFollower(reply.Term)
 		fmt.Printf("[Step Down] %d Term: %d -> %d\n", rf.me, rf.currentTerm, reply.Term)
 		rf.currentTerm = reply.Term
 		rf.state = FOLLOWER
 		rf.votedFor = NOT_VOTE
 		//rf.heartbeatChan <- true
-		//rf.mu.Unlock()
 		return
 	}
 
@@ -569,7 +583,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		index = len(rf.logs)
 		rf.logs = append(rf.logs, Log{term, command})
-		fmt.Printf("[%d][Append Log] L: %d \n", rf.me, len(rf.logs))
+		fmt.Printf("[%d][Append Log] L: %d Command: %v\n", rf.me, len(rf.logs), command)
 	}
 	// Your code here (2B).
 
@@ -620,6 +634,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
 
+	rf.lastApplied = 0
+	rf.commitIndex = 0
+
 	rf.heartbeatChan = make(chan bool, 100)
 	rf.electionChan = make(chan bool, 100)
 	rf.commitChan = make(chan bool, 100)
@@ -630,12 +647,36 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	go rf.setTimeouts()
+	go rf.commitEvent(applyCh)
 	fmt.Printf("[Server Create] %d %d \n", rf.me, rf.currentTerm)
 	return rf
 }
 
+func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
+	for {
+		if rf.killed {
+			return
+		}
+		select {
+		case <- rf.commitChan:
+			rf.mu.Lock()
+			for i:= rf.lastApplied + 1; i <= rf.commitIndex; i++{
+				newAppliedMsg := ApplyMsg{
+					true,
+					rf.logs[i].Command,
+					i,
+				}
+				applyCh <- newAppliedMsg
+				rf.lastApplied = i
+			}
+			rf.mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func (rf *Raft) setTimeouts() {
-	HEARTBEAT_TIMEOUT := time.Duration(150 * 1000 * 1000)
+	HEARTBEAT_TIMEOUT := time.Duration(150 * time.Millisecond)
 	// OP_TIMEOUT := time.Duration(1000*1000*1000)
 	for {
 		//timeoutflag := rand.Intn(66)
