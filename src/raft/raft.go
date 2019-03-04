@@ -373,6 +373,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.currentTerm = args.Term
 		rf.state = FOLLOWER
 		rf.votedFor = NOT_VOTE
+		//rf.heartbeatChan <- true
 	}
 
 	// incoming index can't fill the hole
@@ -401,7 +402,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = min(rf.getLastIndex(), args.LeaderCommit)
 	}
 	reply.Success = true
-	fmt.Printf("[%d][Copy Log Suc] %d \n", rf.me, len(rf.logs))
+	fmt.Printf("[%d][Copy Log Suc] prevlogindex %d afterappendlength %d \n",
+		rf.me, args.PrevLogIndex, len(rf.logs))
 	//return
 }
 
@@ -524,7 +526,7 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 		rf.currentTerm = reply.Term
 		rf.state = FOLLOWER
 		rf.votedFor = NOT_VOTE
-		rf.heartbeatChan <- true
+		//rf.heartbeatChan <- true
 		//rf.mu.Unlock()
 		return
 	}
@@ -579,9 +581,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
 	fmt.Printf("[Killing] %d\n", rf.me)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.state = -1
+	//rf.mu.Lock()
+	//defer rf.mu.Unlock()
+	//rf.state = -1
 	rf.killChan <- true
 	//fmt.Printf("%d cur state %d\n", rf.me, rf.state)
 
@@ -637,7 +639,7 @@ func (rf *Raft) setTimeouts() {
 		fmt.Printf("[%d] State: %d VoteFor: %d\n", rf.me, rf.state, rf.votedFor)
 		rf.mu.Unlock()
 		if curState == -1 {
-			break
+			return
 		}
 		switch curState {
 		case FOLLOWER:
@@ -648,8 +650,8 @@ func (rf *Raft) setTimeouts() {
 				rf.mu.Lock()
 				rf.state = CANDIDATE
 				rf.mu.Unlock()
-				//rf.startElection()
-				//fmt.Printf("[HB Timeout] %d\n", rf.me)
+				rf.startElection() // critical
+				fmt.Printf("[HB Timeout] %d\n", rf.me)
 			case <-rf.killChan:
 				fmt.Printf("[Recv Kill %d]\n", rf.me)
 				return
@@ -657,12 +659,13 @@ func (rf *Raft) setTimeouts() {
 				//	continue
 			}
 		case CANDIDATE:
+			//rf.startElection()
 			select {
 			case <-rf.heartbeatChan:
 				fmt.Printf("%d hb Candidate\n", rf.me)
 				rf.mu.Lock()
 				rf.state = FOLLOWER
-				rf.votedFor = NOT_VOTE
+				//rf.votedFor = NOT_VOTE
 				rf.mu.Unlock()
 			case <-rf.electionChan:
 				fmt.Printf("[Win Elect] %d\n", rf.me)
@@ -694,13 +697,15 @@ func (rf *Raft) setTimeouts() {
 				//default:
 				//	continue
 			}
-		default:
-			select {
-			case <-rf.killChan:
-				fmt.Printf("[Recv Kill %d]\n", rf.me)
-				return
-			}
-		}
+			//default:
+			//	select {
+			//	case <-rf.killChan:
+			//		fmt.Printf("[Recv Kill %d]\n", rf.me)
+			//		return
+			//	default:
+			//		return
+			//	}
 
+		}
 	}
 }
