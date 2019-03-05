@@ -140,8 +140,8 @@ func (rf *Raft) GetState() (int, bool) {
 //}
 
 func (rf *Raft) switchToLeader() {
-	DPrintf("[New Leader] %d - Term %d\n", rf.me, rf.currentTerm)
 	rf.mu.Lock()
+	DPrintf("[New Leader] %d - Term %d\n", rf.me, rf.currentTerm)
 	rf.state = LEADER
 	// init records for followers
 	nextIndex := len(rf.logs)
@@ -266,6 +266,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.votedFor = args.CandidateId
 			rf.state = FOLLOWER
 			rf.heartbeatChan <- true
+			rf.persist()
 			return
 		} else {
 			DPrintf("[Rej Vote] not match\n")
@@ -287,12 +288,6 @@ func (rf *Raft) startElection() {
 	rf.currentTerm++
 	rf.state = CANDIDATE
 	rf.persist()
-	requestVoteArgs := RequestVoteArgs{
-		rf.currentTerm,
-		rf.me,
-		rf.getLastIndex(),
-		rf.getLastTerm(),
-	}
 	// DPrintf("%d Term %d Hold Election [Peers = %d]\n", rf.me, rf.currentTerm, len(rf.peers))
 	rf.mu.Unlock()
 	for i := range rf.peers {
@@ -303,6 +298,12 @@ func (rf *Raft) startElection() {
 		if rf.state != CANDIDATE {
 			rf.mu.Unlock()
 			return
+		}
+		requestVoteArgs := RequestVoteArgs{
+			rf.currentTerm,
+			rf.me,
+			rf.getLastIndex(),
+			rf.getLastTerm(),
 		}
 		rf.mu.Unlock()
 
@@ -324,7 +325,7 @@ func (rf *Raft) startElection() {
 					rf.currentTerm = requestVoteReply.Term
 					rf.state = FOLLOWER
 					rf.votedFor = NOT_VOTE
-					// rf.heartbeatChan <- true
+					rf.heartbeatChan <- true
 					//rf.mu.Unlock()
 					rf.persist()
 					return
@@ -374,7 +375,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// follower
 	// reset heartbeat
 	rf.heartbeatChan <- true
-	if rf.currentTerm < args.Term{
+	if rf.currentTerm <= args.Term {
 		//rf.switchToFollower(args.Term)
 		// if rf.currentTerm < args.Term {
 		DPrintf("[Update Term] %d{%d} Term %d -> %d\n", rf.me, rf.state, rf.currentTerm, args.Term)
@@ -383,7 +384,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.state = FOLLOWER
 		rf.votedFor = NOT_VOTE
 		rf.persist()
-		rf.heartbeatChan <- true
 	}
 
 	// incoming index can't fill the hole
@@ -479,15 +479,15 @@ func (rf *Raft) performCommit() {
 			if indexMatch && termMatch {
 				agreeNum++
 			}
-			if agreeNum > (len(rf.peers))/2 {
+			if agreeNum > len(rf.peers)/2 {
 				willCommitted++
 				break
 			}
 		}
 	}
 	if willCommitted > 0 {
-		rf.commitChan <- true
 		rf.commitIndex += willCommitted
+		rf.commitChan <- true
 		DPrintf("[%d][%d Commited][%d -> %d]\n", rf.me, willCommitted, rf.commitIndex-willCommitted, rf.commitIndex)
 	}
 
@@ -548,10 +548,6 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.state != LEADER {
-		return
-	}
-
 	//term fall back
 	//switch to and initialize as follower
 	if rf.currentTerm < reply.Term {
@@ -565,11 +561,11 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 	}
 
 	//update index
-	if reply.Success && nEntries > 0 {
+	if reply.Success {
 		// not void hb
 		rf.nextIndex[peer] = reply.NextIndex
 		rf.matchIndex[peer] = reply.NextIndex - 1
-		rf.performCommit()
+		// rf.performCommit()
 	} else if !reply.Success {
 		// not match, has been decreased
 		rf.nextIndex[peer] = reply.NextIndex
@@ -618,10 +614,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
 	DPrintf("[Killing] %d\n", rf.me)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.killed = true
-	rf.killChan <- true
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
+	// rf.killed = true
+	// rf.killChan <- true
 	//DPrintf("%d cur state %d\n", rf.me, rf.state)
 
 }
@@ -698,16 +694,16 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 }
 
 func (rf *Raft) setTimeouts() {
-	HEARTBEAT_TIMEOUT := time.Duration(200 * time.Millisecond)
+	HEARTBEAT_TIMEOUT := time.Duration(120 * time.Millisecond)
 	// OP_TIMEOUT := time.Duration(1000*1000*1000)
 	for {
 		//timeoutflag := rand.Intn(66)
-		ELECTION_TIMEOUT := time.Duration((rand.Intn(150) + 250) * 1000 * 1000)
+		ELECTION_TIMEOUT := time.Duration((rand.Intn(200) + 200) * 1000 * 1000)
 		// DPrintf("fffffff\n")
 		rf.mu.Lock()
 		curState := rf.state
 		killed := rf.killed
-		// DPrintf("[%d] State: %d VoteFor: %d\n", rf.me, rf.state, rf.votedFor)
+		DPrintf("[%d] State: %d VoteFor: %d\n", rf.me, rf.state, rf.votedFor)
 		rf.mu.Unlock()
 		if killed {
 			return
@@ -731,7 +727,7 @@ func (rf *Raft) setTimeouts() {
 				DPrintf("%d hb Candidate\n", rf.me)
 				rf.mu.Lock()
 				rf.state = FOLLOWER
-				rf.votedFor = NOT_VOTE
+				// rf.votedFor = NOT_VOTE
 				rf.mu.Unlock()
 			case <-rf.electionChan:
 				DPrintf("[Win Elect] %d\n", rf.me)
