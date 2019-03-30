@@ -6,6 +6,7 @@ import (
 	"log"
 	"raft"
 	"sync"
+	"time"
 )
 
 const Debug = 1
@@ -17,6 +18,8 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+const RAFT_COMMIT_TIMEOUT = time.Duration(5 * time.Second)
+
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
@@ -24,6 +27,9 @@ type Op struct {
 	Type  string // "Put", "Append", "Get"
 	Key   string
 	Value string
+
+	ClientId	int
+	SerialNum	int
 }
 
 type wOp struct {
@@ -43,12 +49,13 @@ type KVServer struct {
 	lastPerformedIndex int
 	db                 map[string]string
 	waitings           map[int]*wOp
+	executed			map[int]int
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	//DPrintf("[%d][KVServer Recv Op][*Get* %s]\n", kv.me, args.Key)
-	op := Op{Type: "Get", Key: args.Key, Value: ""}
+	op := Op{Type: "Get", Key: args.Key, Value: "", ClientId: args.ClientId, SerialNum: args.OpSerialNum}
 	if kv.rf != nil {
 		reply.WrongLeader = kv.PerformOp(op)
 		if !reply.WrongLeader {
@@ -66,7 +73,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	//DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
-	op := Op{Type: args.Op, Key: args.Key, Value: args.Value}
+	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
 	if kv.rf != nil {
 		reply.WrongLeader = kv.PerformOp(op)
 		if !reply.WrongLeader {
@@ -86,7 +93,12 @@ func (kv *KVServer) PerformOp(op Op) bool {
 		kv.waitings[index] = &wOp{&op, completeChan}
 		kv.mu.Unlock()
 
-		complete := <-completeChan
+		var complete bool
+		select{
+			case complete = <-completeChan:
+			case <- time.After(RAFT_COMMIT_TIMEOUT):
+				complete = false
+		}
 		kv.mu.Lock()
 		delete(kv.waitings, index)
 		kv.mu.Unlock()
@@ -101,6 +113,7 @@ func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
 	cmdIndex := applied.CommandIndex
 	DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
 	oriV, hasKey := kv.db[op.Key]
+	if (op.SerialNum)
 	switch op.Type {
 	case "Put":
 		kv.db[op.Key] = op.Value
@@ -117,7 +130,11 @@ func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
 	}
 
 	if kv.waitings[cmdIndex] != nil {
-		kv.waitings[cmdIndex].complete <- true
+		if op.ClientId == kv.waitings[cmdIndex].Op.ClientId{
+			kv.waitings[cmdIndex].complete <- true
+		} else{
+			kv.waitings[cmdIndex].complete <- false
+		}
 	} else {
 		return
 	}
@@ -166,7 +183,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
 	kv.waitings = make(map[int]*wOp)
+	kv.executed = make(map[int]int)
 	kv.lastPerformedIndex = 0
+
 
 	go func() {
 		for applied := range kv.applyCh {

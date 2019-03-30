@@ -10,7 +10,8 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
-	leaderId int
+	leaderId         int
+	nextCmdSerialNum int
 }
 
 func nrand() int64 {
@@ -25,6 +26,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.servers = servers
 	// You'll have to add code here.
 	ck.leaderId = 0
+	ck.nextCmdSerialNum = 0
 	return ck
 }
 
@@ -52,8 +54,9 @@ func (ck *Clerk) Get(key string) string {
 
 func (ck *Clerk) SendGet(key string, resp chan string) {
 	i := ck.leaderId
-	args := GetArgs{key}
 	for {
+		args := GetArgs{key, i, ck.nextCmdSerialNum}
+		ck.nextCmdSerialNum++
 		reply := GetReply{}
 		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
 		if ok {
@@ -95,8 +98,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bool) {
 	i := ck.leaderId
-	args := PutAppendArgs{key, value, op}
 	for {
+		args := PutAppendArgs{key, value, op, i, ck.nextCmdSerialNum}
 		reply := PutAppendReply{}
 		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
 		if ok {
