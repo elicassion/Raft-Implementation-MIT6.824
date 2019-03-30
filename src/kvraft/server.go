@@ -26,6 +26,11 @@ type Op struct {
 	Value string
 }
 
+type wOp struct {
+	Op       *Op
+	complete chan bool
+}
+
 type KVServer struct {
 	mu      sync.Mutex
 	me      int
@@ -37,101 +42,86 @@ type KVServer struct {
 	// Your definitions here.
 	lastPerformedIndex int
 	db                 map[string]string
+	waitings           map[int]*wOp
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	DPrintf("[KVServer Recv Op][*Get* %s]\n", args.Key)
+	//DPrintf("[%d][KVServer Recv Op][*Get* %s]\n", kv.me, args.Key)
 	op := Op{Type: "Get", Key: args.Key, Value: ""}
 	if kv.rf != nil {
-		index, _, ok := kv.rf.Start(op)
-		if !ok {
-			reply.WrongLeader = true
-		} else {
-			DPrintf("[Intended Index][I: %d]\n", index)
-			for {
-				applied := <-kv.applyCh
-				DPrintf("[Applied][I: %d]\n", applied.CommandIndex)
-				kv.mu.Lock()
-				if kv.lastPerformedIndex >= applied.CommandIndex {
-					kv.mu.Unlock()
-					continue
-				}
-				isCurIndex := index == applied.CommandIndex
-				value := kv.PerformOp(applied.Command.(Op), isCurIndex)
-				kv.lastPerformedIndex = applied.CommandIndex
-				kv.mu.Unlock()
-				if isCurIndex {
-					reply.WrongLeader = false
-					reply.Err = OK
-					reply.Value = value
-					return
-				}
+		reply.WrongLeader = kv.PerformOp(op)
+		if !reply.WrongLeader {
+			oriV, hasKey := kv.db[op.Key]
+			if hasKey {
+				reply.Err = OK
+				reply.Value = oriV
+			} else {
+				reply.Err = ErrNoKey
 			}
-
 		}
 	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	DPrintf("[KVServer Recv Op][*%s* {%s, %s}]\n", args.Op, args.Key, args.Value)
+	//DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
 	op := Op{Type: args.Op, Key: args.Key, Value: args.Value}
 	if kv.rf != nil {
-		index, _, ok := kv.rf.Start(op)
-		if !ok {
-			reply.WrongLeader = true
-		} else {
-			DPrintf("[Intended Index][I: %d]\n", index)
-			for {
-				applied := <-kv.applyCh
-				//DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", applied.CommandIndex)
-				DPrintf("[Applied][I: %d]\n", applied.CommandIndex)
-				kv.mu.Lock()
-				if kv.lastPerformedIndex >= applied.CommandIndex {
-					continue
-				}
-				isCurIndex := index == applied.CommandIndex
-				kv.PerformOp(applied.Command.(Op), isCurIndex)
-				kv.lastPerformedIndex = applied.CommandIndex
-				kv.mu.Unlock()
-				if isCurIndex {
-					reply.WrongLeader = false
-					reply.Err = OK
-					return
-				}
-			}
-
+		reply.WrongLeader = kv.PerformOp(op)
+		if !reply.WrongLeader {
+			reply.Err = OK
 		}
 	}
 }
 
-func (kv *KVServer) PerformOp(op Op, isCurOp bool) string {
+func (kv *KVServer) PerformOp(op Op) bool {
+	index, _, ok := kv.rf.Start(op)
+	if !ok {
+		return true
+	} else {
+		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
+		completeChan := make(chan bool)
+		kv.mu.Lock()
+		kv.waitings[index] = &wOp{&op, completeChan}
+		kv.mu.Unlock()
+
+		complete := <-completeChan
+		kv.mu.Lock()
+		delete(kv.waitings, index)
+		kv.mu.Unlock()
+		return !complete
+	}
+}
+
+func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	op := applied.Command.(Op)
+	cmdIndex := applied.CommandIndex
+	DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
 	oriV, hasKey := kv.db[op.Key]
 	switch op.Type {
-	case "Get":
-		if !isCurOp {
-			return ""
-		} else {
-			if !hasKey {
-				return ""
-			} else {
-				return oriV
-			}
-		}
 	case "Put":
 		kv.db[op.Key] = op.Value
-		return ""
+		break
 	case "Append":
 		if hasKey {
 			kv.db[op.Key] = oriV + op.Value
 		} else {
 			kv.db[op.Key] = op.Value
 		}
-		return ""
+		break
 	default:
-		return ""
+		break
 	}
+
+	if kv.waitings[cmdIndex] != nil {
+		kv.waitings[cmdIndex].complete <- true
+	} else {
+		return
+	}
+
 }
 
 //
@@ -170,11 +160,18 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
-	kv.applyCh = make(chan raft.ApplyMsg, 100)
+	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
+	kv.waitings = make(map[int]*wOp)
 	kv.lastPerformedIndex = 0
+
+	go func() {
+		for applied := range kv.applyCh {
+			kv.CompleteOp(applied)
+		}
+	}()
 	return kv
 }

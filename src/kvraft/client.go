@@ -43,9 +43,11 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	respChan := make(chan string)
+	respChan := make(chan string, 200)
 	go ck.SendGet(key, respChan)
-	return <-respChan
+	v := <-respChan
+	DPrintf("[*Get*, %s][%v]\n", key, v)
+	return v
 }
 
 func (ck *Clerk) SendGet(key string, resp chan string) {
@@ -82,9 +84,10 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
-	respChan := make(chan bool)
+	respChan := make(chan bool, 200)
 	go ck.SendPutAppend(key, value, op, respChan)
 	ok := <-respChan
+	DPrintf("[*%s*, {%s, %s}][%t]\n", op, key, value, ok)
 	if ok {
 		return
 	}
