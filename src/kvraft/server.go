@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -17,11 +17,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Type  string // "Put", "Append", "Get"
+	Key   string
+	Value string
 }
 
 type KVServer struct {
@@ -33,15 +35,103 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	lastPerformedIndex int
+	db                 map[string]string
 }
-
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	DPrintf("[KVServer Recv Op][*Get* %s]\n", args.Key)
+	op := Op{Type: "Get", Key: args.Key, Value: ""}
+	if kv.rf != nil {
+		index, _, ok := kv.rf.Start(op)
+		if !ok {
+			reply.WrongLeader = true
+		} else {
+			DPrintf("[Intended Index][I: %d]\n", index)
+			for {
+				applied := <-kv.applyCh
+				DPrintf("[Applied][I: %d]\n", applied.CommandIndex)
+				kv.mu.Lock()
+				if kv.lastPerformedIndex >= applied.CommandIndex {
+					kv.mu.Unlock()
+					continue
+				}
+				isCurIndex := index == applied.CommandIndex
+				value := kv.PerformOp(applied.Command.(Op), isCurIndex)
+				kv.lastPerformedIndex = applied.CommandIndex
+				kv.mu.Unlock()
+				if isCurIndex {
+					reply.WrongLeader = false
+					reply.Err = OK
+					reply.Value = value
+					return
+				}
+			}
+
+		}
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	DPrintf("[KVServer Recv Op][*%s* {%s, %s}]\n", args.Op, args.Key, args.Value)
+	op := Op{Type: args.Op, Key: args.Key, Value: args.Value}
+	if kv.rf != nil {
+		index, _, ok := kv.rf.Start(op)
+		if !ok {
+			reply.WrongLeader = true
+		} else {
+			DPrintf("[Intended Index][I: %d]\n", index)
+			for {
+				applied := <-kv.applyCh
+				//DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", applied.CommandIndex)
+				DPrintf("[Applied][I: %d]\n", applied.CommandIndex)
+				kv.mu.Lock()
+				if kv.lastPerformedIndex >= applied.CommandIndex {
+					continue
+				}
+				isCurIndex := index == applied.CommandIndex
+				kv.PerformOp(applied.Command.(Op), isCurIndex)
+				kv.lastPerformedIndex = applied.CommandIndex
+				kv.mu.Unlock()
+				if isCurIndex {
+					reply.WrongLeader = false
+					reply.Err = OK
+					return
+				}
+			}
+
+		}
+	}
+}
+
+func (kv *KVServer) PerformOp(op Op, isCurOp bool) string {
+	oriV, hasKey := kv.db[op.Key]
+	switch op.Type {
+	case "Get":
+		if !isCurOp {
+			return ""
+		} else {
+			if !hasKey {
+				return ""
+			} else {
+				return oriV
+			}
+		}
+	case "Put":
+		kv.db[op.Key] = op.Value
+		return ""
+	case "Append":
+		if hasKey {
+			kv.db[op.Key] = oriV + op.Value
+		} else {
+			kv.db[op.Key] = op.Value
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 //
@@ -80,10 +170,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
-	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
-
+	kv.db = make(map[string]string)
+	kv.lastPerformedIndex = 0
 	return kv
 }
