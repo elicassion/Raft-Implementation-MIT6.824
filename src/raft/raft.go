@@ -93,13 +93,10 @@ func (logs *Logs) appendSingle(l Log) {
 }
 
 func (logs *Logs) slice(start int, end int) []Log {
-	if start >= end {
-		return make([]Log, 0)
-	}
 	//l := logs.len()
-	if start < 0 && end > 0 {
+	if start < 0 && end >= 0 {
 		return logs.Lgs[:end-logs.LastSnapshotIndex-1]
-	} else if start > 0 && end < 0 {
+	} else if start >= 0 && end < 0 {
 		return logs.Lgs[start-logs.LastSnapshotIndex-1:]
 	} else {
 		return logs.Lgs[start-logs.LastSnapshotIndex-1 : end-logs.LastSnapshotIndex-1]
@@ -113,6 +110,7 @@ func (logs *Logs) len() int {
 }
 
 func (logs *Logs) getLast() *Log {
+	//DPrintf("[Log len]: %d\n", len(logs.Lgs))
 	return &logs.Lgs[len(logs.Lgs)-1]
 }
 
@@ -417,7 +415,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.currentTerm > args.Term {
 		// send updated term
 		reply.Term = rf.currentTerm
-		DPrintf("[Rej Append from %d] term fall back\n", args.LeaderID)
+		DPrintf("[%d][Rej Append from %d] term fall back\n", rf.me, args.LeaderID)
 		//rf.mu.Unlock()
 		return
 	}
@@ -464,7 +462,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// copy
 	//rf.logs = append(rf.logs[:args.PrevLogIndex+1], args.Entries...)
-	rf.logs.Lgs = rf.logs.slice(-1, args.PrevLogIndex)
+	rf.logs.Lgs = rf.logs.slice(-1, args.PrevLogIndex+1)
 	rf.logs.append(args.Entries)
 	rf.persist()
 	// DPrintf("[Log Len] %d\n", len(rf.logs))
@@ -483,8 +481,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	//DPrintf("[%d][Copy Log Suc] prevlogindex %d afterappendlength %d \n",
 	//	rf.me, args.PrevLogIndex, len(rf.logs))
-	DPrintf("[%d][Copy Log Suc] prevlogindex %d afterappendlength %d \n",
-		rf.me, args.PrevLogIndex, rf.logs.len())
+	DPrintf("[%d][Copy Log Suc] [Prev Log Index]: %d [Length After Append]: %d \n",
+		rf.me, args.PrevLogIndex, rf.getLastIndex())
 	//return
 }
 
@@ -527,7 +525,7 @@ func (rf *Raft) performCommit() {
 	// DPrintf("[%d][Perform Commit]\n", rf.me)
 	willCommitted := -1
 	//for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
-	for i := rf.commitIndex + 1; i < rf.logs.len(); i++ {
+	for i := rf.commitIndex + 1; i <= rf.logs.getLast().Index; i++ {
 		agreeNum := 1
 		for j := range rf.peers {
 			if j == rf.me {
@@ -672,7 +670,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.logs.appendSingle(Log{term, index, command})
 		rf.persist()
 		//DPrintf("[%d][Append Log] L: %d Command: %v\n", rf.me, len(rf.logs), command)
-		DPrintf("[%d][Append Log] L: %d Command: %v\n", rf.me, index, command)
+		DPrintf("[%d][Append Log] I: %d Command: %v\n", rf.me, index, command)
 	}
 	// Your code here (2B).
 
@@ -761,6 +759,7 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 					rf.logs.get(i).Command,
 					i,
 				}
+				DPrintf("[%d][Commit][Index: %d]\n", rf.me, i)
 				rf.lastApplied = i
 				applyCh <- newAppliedMsg
 			}
