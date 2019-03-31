@@ -65,9 +65,14 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 			if reply.WrongLeader {
 				i = (i + 1) % len(ck.servers)
 				continue
-			} else if reply.Err == OK {
+			} else {
 				ck.leaderId = i
-				resp <- reply.Value
+				if reply.Err == OK {
+					resp <- reply.Value
+				} else {
+					resp <- ""
+				}
+				//resp <- reply.Value
 				return
 			}
 		} else {
@@ -109,7 +114,7 @@ func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bo
 			if reply.WrongLeader {
 				i = (i + 1) % len(ck.servers)
 				continue
-			} else if reply.Err == OK {
+			} else {
 				ck.leaderId = i
 				resp <- true
 				return

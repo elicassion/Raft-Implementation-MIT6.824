@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -35,6 +35,7 @@ type Op struct {
 type wOp struct {
 	Op       *Op
 	complete chan bool
+	term     int
 }
 
 type KVServer struct {
@@ -85,14 +86,14 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *KVServer) PerformOp(op Op) bool {
-	index, _, ok := kv.rf.Start(op)
+	index, term, ok := kv.rf.Start(op)
 	if !ok {
 		return true
 	} else {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
 		completeChan := make(chan bool)
 		kv.mu.Lock()
-		kv.waitings[index] = append(kv.waitings[index], &wOp{&op, completeChan})
+		kv.waitings[index] = append(kv.waitings[index], &wOp{&op, completeChan, term})
 		kv.mu.Unlock()
 
 		var complete bool

@@ -656,8 +656,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = 0
 	rf.commitIndex = 0
 
-	rf.heartbeatChan = make(chan bool, 200)
-	rf.electionChan = make(chan bool, 200)
+	rf.heartbeatChan = make(chan bool, 5)
+	rf.electionChan = make(chan bool, 2)
 	rf.commitChan = make(chan bool, 200)
 	rf.killChan = make(chan bool, 200)
 	rf.killed = false
