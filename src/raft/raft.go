@@ -70,9 +70,41 @@ type ApplyMsg struct {
 //
 
 type Log struct {
-	Term int
-	//Index   int
+	Term    int
+	Index   int
 	Command interface{}
+}
+
+type Logs struct {
+	Lgs               []Log
+	LastSnapshotIndex int
+}
+
+func (logs *Logs) get(i int) *Log {
+	return &logs.Lgs[i-logs.LastSnapshotIndex]
+}
+
+func (logs *Logs) append(elems []Log) {
+	logs.Lgs = append(logs.Lgs, elems...)
+}
+
+func (logs *Logs) slice(start int, end int) []Log {
+	if start >= end {
+		return make([]Log, 0)
+	}
+	//l := logs.len()
+	//if start < 0 { start = l - start }
+	//if end < 0 { end = 0 }
+	//if end > l { end = l }
+	return logs.Lgs[start:end]
+}
+
+func (logs *Logs) len() int {
+	return len(logs.Lgs)
+}
+
+func (logs *Logs) getLast() *Log {
+	return &logs.Lgs[len(logs.Lgs)-1]
 }
 
 type State int
@@ -575,6 +607,11 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 		// not match, has been decreased
 		rf.nextIndex[peer] = reply.NextIndex
 	}
+
+}
+
+// install snapshot
+func (rf *Raft) InstallSnapshot() {
 
 }
 
