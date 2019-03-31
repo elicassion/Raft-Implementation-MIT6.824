@@ -12,6 +12,7 @@ type Clerk struct {
 	// You will have to modify this struct.
 	leaderId         int
 	nextCmdSerialNum int
+	Id               int64
 }
 
 func nrand() int64 {
@@ -27,6 +28,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	// You'll have to add code here.
 	ck.leaderId = 0
 	ck.nextCmdSerialNum = 0
+	ck.Id = nrand()
 	return ck
 }
 
@@ -55,8 +57,8 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) SendGet(key string, resp chan string) {
 	i := ck.leaderId
 	for {
-		args := GetArgs{key, i, ck.nextCmdSerialNum}
 		ck.nextCmdSerialNum++
+		args := GetArgs{key, ck.Id, ck.nextCmdSerialNum}
 		reply := GetReply{}
 		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
 		if ok {
@@ -99,7 +101,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bool) {
 	i := ck.leaderId
 	for {
-		args := PutAppendArgs{key, value, op, i, ck.nextCmdSerialNum}
+		ck.nextCmdSerialNum++
+		args := PutAppendArgs{key, value, op, ck.Id, ck.nextCmdSerialNum}
 		reply := PutAppendReply{}
 		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
 		if ok {

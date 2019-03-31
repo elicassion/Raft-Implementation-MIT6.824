@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -18,7 +18,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RAFT_COMMIT_TIMEOUT = time.Duration(5 * time.Second)
+const RAFT_COMMIT_TIMEOUT = time.Duration(3 * time.Second)
 
 type Op struct {
 	// Your definitions here.
@@ -28,8 +28,8 @@ type Op struct {
 	Key   string
 	Value string
 
-	ClientId	int
-	SerialNum	int
+	ClientId  int64
+	SerialNum int
 }
 
 type wOp struct {
@@ -48,8 +48,8 @@ type KVServer struct {
 	// Your definitions here.
 	lastPerformedIndex int
 	db                 map[string]string
-	waitings           map[int]*wOp
-	executed			map[int]int
+	waitings           map[int][]*wOp
+	executed           map[int64]int
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -59,7 +59,9 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	if kv.rf != nil {
 		reply.WrongLeader = kv.PerformOp(op)
 		if !reply.WrongLeader {
+			kv.mu.Lock()
 			oriV, hasKey := kv.db[op.Key]
+			kv.mu.Unlock()
 			if hasKey {
 				reply.Err = OK
 				reply.Value = oriV
@@ -90,14 +92,14 @@ func (kv *KVServer) PerformOp(op Op) bool {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
 		completeChan := make(chan bool)
 		kv.mu.Lock()
-		kv.waitings[index] = &wOp{&op, completeChan}
+		kv.waitings[index] = append(kv.waitings[index], &wOp{&op, completeChan})
 		kv.mu.Unlock()
 
 		var complete bool
-		select{
-			case complete = <-completeChan:
-			case <- time.After(RAFT_COMMIT_TIMEOUT):
-				complete = false
+		select {
+		case complete = <-completeChan:
+		case <-time.After(RAFT_COMMIT_TIMEOUT):
+			complete = false
 		}
 		kv.mu.Lock()
 		delete(kv.waitings, index)
@@ -111,30 +113,41 @@ func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
 	defer kv.mu.Unlock()
 	op := applied.Command.(Op)
 	cmdIndex := applied.CommandIndex
-	DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
 	oriV, hasKey := kv.db[op.Key]
-	if (op.SerialNum)
-	switch op.Type {
-	case "Put":
-		kv.db[op.Key] = op.Value
-		break
-	case "Append":
-		if hasKey {
-			kv.db[op.Key] = oriV + op.Value
-		} else {
+	lastExe, seenClient := kv.executed[op.ClientId]
+	if !seenClient {
+		kv.executed[op.ClientId] = 0
+		lastExe = 0
+	}
+	if op.SerialNum > lastExe {
+		DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
+		switch op.Type {
+		case "Put":
 			kv.db[op.Key] = op.Value
+			break
+		case "Append":
+			if hasKey {
+				kv.db[op.Key] = oriV + op.Value
+			} else {
+				kv.db[op.Key] = op.Value
+			}
+			break
+		default:
+			break
 		}
-		break
-	default:
-		break
+		kv.executed[op.ClientId] = op.SerialNum
 	}
 
 	if kv.waitings[cmdIndex] != nil {
-		if op.ClientId == kv.waitings[cmdIndex].Op.ClientId{
-			kv.waitings[cmdIndex].complete <- true
-		} else{
-			kv.waitings[cmdIndex].complete <- false
+		wOpList := kv.waitings[cmdIndex]
+		for i := range wOpList {
+			if op.ClientId == wOpList[i].Op.ClientId && op.SerialNum == wOpList[i].Op.SerialNum {
+				kv.waitings[cmdIndex][i].complete <- true
+			} else {
+				kv.waitings[cmdIndex][i].complete <- false
+			}
 		}
+
 	} else {
 		return
 	}
@@ -182,10 +195,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
-	kv.waitings = make(map[int]*wOp)
-	kv.executed = make(map[int]int)
+	kv.waitings = make(map[int][]*wOp)
+	kv.executed = make(map[int64]int)
 	kv.lastPerformedIndex = 0
-
 
 	go func() {
 		for applied := range kv.applyCh {
