@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -147,7 +147,6 @@ func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
 				kv.waitings[cmdIndex][i].complete <- false
 			}
 		}
-
 	} else {
 		return
 	}

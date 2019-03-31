@@ -56,8 +56,8 @@ func (ck *Clerk) Get(key string) string {
 
 func (ck *Clerk) SendGet(key string, resp chan string) {
 	i := ck.leaderId
+	ck.nextCmdSerialNum++
 	for {
-		ck.nextCmdSerialNum++
 		args := GetArgs{key, ck.Id, ck.nextCmdSerialNum}
 		reply := GetReply{}
 		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
@@ -100,8 +100,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bool) {
 	i := ck.leaderId
+	ck.nextCmdSerialNum++
 	for {
-		ck.nextCmdSerialNum++
 		args := PutAppendArgs{key, value, op, ck.Id, ck.nextCmdSerialNum}
 		reply := PutAppendReply{}
 		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
