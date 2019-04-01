@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -19,7 +19,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RAFT_COMMIT_TIMEOUT = time.Duration(3 * time.Second)
+const RAFT_COMMIT_TIMEOUT = time.Duration(1 * time.Second)
 
 type Op struct {
 	// Your definitions here.
@@ -76,7 +76,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
+	//DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
 	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
 	if kv.rf != nil {
 		reply.WrongLeader = kv.PerformOp(op)

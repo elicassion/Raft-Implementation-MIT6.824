@@ -85,9 +85,9 @@ type Logs struct {
 
 func (logs *Logs) get(i int) *Log {
 	//DPrintf("[Last Snapshot Index]: %d\n", logs.LastSnapshotIndex)
-	if i == logs.LastSnapshotIndex {
-		return &Log{logs.LastSnapshotTerm, logs.LastSnapshotIndex, logs.LastCommand}
-	}
+	//if i == logs.LastSnapshotIndex {
+	//	return &Log{logs.LastSnapshotTerm, logs.LastSnapshotIndex, logs.LastCommand}
+	//}
 	return &logs.Lgs[i-logs.LastSnapshotIndex-1]
 }
 
@@ -524,7 +524,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	// check term match
 	//if rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
-	if rf.logs.get(args.PrevLogIndex).Term != args.PrevLogTerm {
+
+	if args.PrevLogIndex > rf.logs.LastSnapshotIndex && rf.logs.get(args.PrevLogIndex).Term != args.PrevLogTerm {
 		reply.NextIndex = args.PrevLogIndex
 		//for i := args.PrevLogIndex - 1; i >= 0 && rf.logs[i].Term == rf.logs[args.PrevLogIndex].Term; i-- {
 		for i := args.PrevLogIndex - 1; i > rf.logs.LastSnapshotIndex && rf.logs.get(i).Term == rf.logs.get(args.PrevLogIndex).Term; i-- {
@@ -663,7 +664,12 @@ func (rf *Raft) heartbeat() {
 		prevLogIndex := min(rf.getLastIndex(), rf.nextIndex[i]-1)
 		//prevLogTerm := rf.logs[prevLogIndex].Term
 		DPrintf("[%d][prevLogIndex]: %d\n", rf.me, prevLogIndex)
-		prevLogTerm := rf.logs.get(prevLogIndex).Term
+		var prevLogTerm int
+		if prevLogIndex == rf.logs.LastSnapshotIndex {
+			prevLogTerm = rf.logs.LastSnapshotTerm
+		} else {
+			prevLogTerm = rf.logs.get(prevLogIndex).Term
+		}
 		entriesArgs := AppendEntriesArgs{
 			rf.currentTerm,
 			rf.me,
