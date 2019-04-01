@@ -613,8 +613,11 @@ func TestSnapshotRPC3B(t *testing.T) {
 		ck1 := cfg.makeClient([]int{0, 1})
 		for i := 0; i < 50; i++ {
 			Put(cfg, ck1, strconv.Itoa(i), strconv.Itoa(i))
+			log.Printf("[Test] [Put Finished]\n")
 		}
+		log.Printf("[Test] [Sleep Finished]\n")
 		time.Sleep(electionTimeout)
+		log.Printf("[Test] [Sleep Finished]\n")
 		Put(cfg, ck1, "b", "B")
 	}
 

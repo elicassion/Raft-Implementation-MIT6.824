@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"labgob"
 	"labrpc"
 	"log"
@@ -32,10 +33,10 @@ type Op struct {
 	SerialNum int
 }
 
-type wOp struct {
+type WOp struct {
 	Op       *Op
-	complete chan bool
-	term     int
+	Complete chan bool
+	Term     int
 }
 
 type KVServer struct {
@@ -49,7 +50,7 @@ type KVServer struct {
 	// Your definitions here.
 	lastPerformedIndex int
 	db                 map[string]string
-	waitings           map[int][]*wOp
+	waitings           map[int][]*WOp
 	executed           map[int64]int
 }
 
@@ -75,7 +76,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	//DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
+	DPrintf("[%d][KVServer Recv Op][*%s* {%s, %s}]\n", kv.me, args.Op, args.Key, args.Value)
 	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
 	if kv.rf != nil {
 		reply.WrongLeader = kv.PerformOp(op)
@@ -93,7 +94,7 @@ func (kv *KVServer) PerformOp(op Op) bool {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
 		completeChan := make(chan bool)
 		kv.mu.Lock()
-		kv.waitings[index] = append(kv.waitings[index], &wOp{&op, completeChan, term})
+		kv.waitings[index] = append(kv.waitings[index], &WOp{&op, completeChan, term})
 		kv.mu.Unlock()
 
 		var complete bool
@@ -109,7 +110,7 @@ func (kv *KVServer) PerformOp(op Op) bool {
 	}
 }
 
-func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
+func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	op := applied.Command.(Op)
@@ -143,13 +144,69 @@ func (kv *KVServer) CompleteOp(applied raft.ApplyMsg) {
 		wOpList := kv.waitings[cmdIndex]
 		for i := range wOpList {
 			if op.ClientId == wOpList[i].Op.ClientId && op.SerialNum == wOpList[i].Op.SerialNum {
-				kv.waitings[cmdIndex][i].complete <- true
+				kv.waitings[cmdIndex][i].Complete <- true
 			} else {
-				kv.waitings[cmdIndex][i].complete <- false
+				kv.waitings[cmdIndex][i].Complete <- false
 			}
 		}
 	} else {
 		return
+	}
+}
+
+func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	data := applied.Snapshot.([]byte)
+	if data == nil || len(data) < 1 {
+		return
+	}
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var db map[string]string
+	var waitings map[int][]*WOp
+	var executed map[int64]int
+	if d.Decode(&db) != nil ||
+		d.Decode(&waitings) != nil ||
+		d.Decode(&executed) != nil {
+		DPrintf("[Decode Error]\n")
+	} else {
+		kv.db = db
+		kv.waitings = waitings
+		kv.executed = executed
+	}
+	//kv.rf.Snapshot(kv.makeSnapshotData())
+}
+
+func (kv *KVServer) RecvApplied(applied *raft.ApplyMsg) {
+	if applied.CommandValid == true {
+		kv.CompleteOp(applied)
+	} else {
+		kv.InstallSnapshot(applied)
+	}
+}
+
+func (kv *KVServer) makeSnapshotData() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.db)
+	e.Encode(kv.waitings)
+	e.Encode(kv.executed)
+	data := w.Bytes()
+	return data
+}
+
+func (kv *KVServer) SurveillanceLogSize() {
+	for kv.maxraftstate > 0 {
+		kv.mu.Lock()
+		size := kv.rf.GetSnapshotSize()
+		//DPrintf("[Log Size]: %d\n", size)
+		if size >= kv.maxraftstate {
+			kv.rf.Snapshot(kv.makeSnapshotData())
+		}
+		kv.mu.Unlock()
+		time.Sleep(time.Duration(1 * time.Second))
 	}
 
 }
@@ -190,19 +247,30 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
-	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.applyCh = make(chan raft.ApplyMsg, 2)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
-	kv.waitings = make(map[int][]*wOp)
+	kv.waitings = make(map[int][]*WOp)
 	kv.executed = make(map[int64]int)
 	kv.lastPerformedIndex = 0
 
 	go func() {
 		for applied := range kv.applyCh {
-			kv.CompleteOp(applied)
+			kv.RecvApplied(&applied)
+			kv.mu.Lock()
+			size := kv.rf.GetSnapshotSize()
+			//DPrintf("[Log Size]: %d\n", size)
+			if size >= kv.maxraftstate && kv.maxraftstate > 0 {
+				kv.rf.Snapshot(kv.makeSnapshotData())
+			}
+			kv.mu.Unlock()
 		}
 	}()
+
+	//go func() {
+	//	kv.SurveillanceLogSize()
+	//}()
 	return kv
 }
