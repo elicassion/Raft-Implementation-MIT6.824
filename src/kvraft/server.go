@@ -2,19 +2,19 @@ package raftkv
 
 import (
 	"bytes"
+	"fmt"
 	"labgob"
 	"labrpc"
-	"log"
 	"raft"
 	"sync"
 	"time"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
-		log.Printf(format, a...)
+		fmt.Printf(format, a...)
 	}
 	return
 }
@@ -34,7 +34,7 @@ type Op struct {
 }
 
 type WOp struct {
-	Op       *Op
+	Op       Op
 	Complete chan bool
 	Term     int
 }
@@ -50,7 +50,7 @@ type KVServer struct {
 	// Your definitions here.
 	lastPerformedIndex int
 	db                 map[string]string
-	waitings           map[int][]*WOp
+	waitings           map[int][]WOp
 	executed           map[int64]int
 }
 
@@ -92,9 +92,9 @@ func (kv *KVServer) PerformOp(op Op) bool {
 		return true
 	} else {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
-		completeChan := make(chan bool)
+		completeChan := make(chan bool, 1)
 		kv.mu.Lock()
-		kv.waitings[index] = append(kv.waitings[index], &WOp{&op, completeChan, term})
+		kv.waitings[index] = append(kv.waitings[index], WOp{op, completeChan, term})
 		kv.mu.Unlock()
 
 		var complete bool
@@ -155,8 +155,7 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 }
 
 func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+
 	data := applied.Snapshot.([]byte)
 	if data == nil || len(data) < 1 {
 		return
@@ -165,13 +164,15 @@ func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var db map[string]string
-	var waitings map[int][]*WOp
+	var waitings map[int][]WOp
 	var executed map[int64]int
 	if d.Decode(&db) != nil ||
 		d.Decode(&waitings) != nil ||
 		d.Decode(&executed) != nil {
 		DPrintf("[Decode Error]\n")
 	} else {
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
 		kv.db = db
 		kv.waitings = waitings
 		kv.executed = executed
@@ -182,6 +183,13 @@ func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
 func (kv *KVServer) RecvApplied(applied *raft.ApplyMsg) {
 	if applied.CommandValid == true {
 		kv.CompleteOp(applied)
+		kv.mu.Lock()
+		size := kv.rf.GetSnapshotSize()
+		//DPrintf("[Log Size]: %d\n", size)
+		if size >= kv.maxraftstate && kv.maxraftstate > 0 {
+			kv.rf.Snapshot(kv.makeSnapshotData())
+		}
+		kv.mu.Unlock()
 	} else {
 		kv.InstallSnapshot(applied)
 	}
@@ -247,25 +255,19 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
-	kv.applyCh = make(chan raft.ApplyMsg, 2)
+	kv.applyCh = make(chan raft.ApplyMsg, 1)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
-	kv.waitings = make(map[int][]*WOp)
+	kv.waitings = make(map[int][]WOp)
 	kv.executed = make(map[int64]int)
 	kv.lastPerformedIndex = 0
 
 	go func() {
+		//time.Sleep(1 * time.Second)
 		for applied := range kv.applyCh {
 			kv.RecvApplied(&applied)
-			kv.mu.Lock()
-			size := kv.rf.GetSnapshotSize()
-			//DPrintf("[Log Size]: %d\n", size)
-			if size >= kv.maxraftstate && kv.maxraftstate > 0 {
-				kv.rf.Snapshot(kv.makeSnapshotData())
-			}
-			kv.mu.Unlock()
 		}
 	}()
 

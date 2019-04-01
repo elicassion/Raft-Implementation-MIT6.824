@@ -654,6 +654,7 @@ func (rf *Raft) heartbeat() {
 		if rf.nextIndex[i] <= rf.logs.LastSnapshotIndex {
 			// send install snapshot
 			rf.OrderInstallSnapshot(i)
+			rf.mu.Unlock()
 			continue
 		}
 
@@ -699,6 +700,10 @@ func (rf *Raft) heartbeat() {
 func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	if rf.state != LEADER {
+		return
+	}
 
 	//term fall back
 	//switch to and initialize as follower
@@ -751,6 +756,7 @@ func (rf *Raft) OrderInstallSnapshot(i int) {
 		reply := InstallSnapshotReply{-1}
 		resp := rf.sendInstallSnapshot(server, args, &reply)
 		if resp {
+			rf.mu.Lock()
 			if rf.state != LEADER {
 				return
 			}
@@ -764,9 +770,10 @@ func (rf *Raft) OrderInstallSnapshot(i int) {
 				}
 				return
 			}
-			rf.matchIndex[server] = rf.logs.LastSnapshotIndex
-			rf.nextIndex[server] = rf.logs.LastSnapshotIndex + 1
+			rf.matchIndex[server] = args.LastIncludedIndex
+			rf.nextIndex[server] = args.LastIncludedIndex + 1
 			rf.performCommit()
+			rf.mu.Unlock()
 		}
 	}(i, &args)
 }
@@ -785,7 +792,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 
-	if rf.currentTerm < args.Term {
+	if rf.currentTerm < args.Term && rf.state != FOLLOWER {
 		rf.votedFor = NOT_VOTE
 		rf.state = FOLLOWER
 		rf.currentTerm = args.Term
@@ -810,6 +817,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.logs.LastSnapshotTerm = args.LastIncludedTerm
 	rf.logs.LastSnapshotIndex = args.LastIncludedIndex
+	rf.commitIndex = args.LastIncludedIndex
+	rf.lastApplied = args.LastIncludedIndex
+	rf.heartbeatChan <- true
+
+	DPrintf("[%d] Installing Snapshot Update State Finished\n", rf.me)
 
 	newAppliedMsg := ApplyMsg{
 		false,
@@ -819,6 +831,9 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		args.SnapshotData,
 	}
 	rf.applyChan <- newAppliedMsg
+
+	DPrintf("[%d] Installing Snapshot Finished\n", rf.me)
+
 }
 
 func (rf *Raft) discardLog() {
@@ -847,14 +862,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := rf.state == LEADER
 	//DPrintf("[%d][Append Log]\n", rf.me)
 	if isLeader {
-		DPrintf("[%d][Append Log] I: %d Command: %v\n", rf.me, index, command)
+		//DPrintf("[%d][Append Log] I: %d Command: %v\n", rf.me, index, command)
 		//index = len(rf.logs)
 		index = rf.getNextIndex()
 		//rf.logs = append(rf.logs, Log{term, command})
 		rf.logs.appendSingle(Log{term, index, command})
 		rf.persist()
 		//DPrintf("[%d][Append Log] L: %d Command: %v\n", rf.me, len(rf.logs), command)
-		//DPrintf("[%d][Append Log] I: %d Command: %v\n", rf.me, index, command)
+		DPrintf("[%d][Append Log] I: %d Command: %v\n", rf.me, index, command)
 	}
 	// Your code here (2B).
 
@@ -909,7 +924,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = 0
 	rf.commitIndex = 0
 
-	rf.heartbeatChan = make(chan bool, 5)
+	rf.heartbeatChan = make(chan bool, 3)
 	rf.electionChan = make(chan bool, 2)
 	rf.commitChan = make(chan bool, 200)
 	rf.killChan = make(chan bool, 200)

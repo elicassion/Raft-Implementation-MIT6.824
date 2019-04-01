@@ -48,25 +48,23 @@ func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
 	respChan := make(chan string, 200)
-	go ck.SendGet(key, respChan)
+	ck.SendGet(key, respChan)
 	v := <-respChan
 	DPrintf("[*Get*, %s][%v]\n", key, v)
 	return v
 }
 
 func (ck *Clerk) SendGet(key string, resp chan string) {
-	i := ck.leaderId
 	ck.nextCmdSerialNum++
 	for {
 		args := GetArgs{key, ck.Id, ck.nextCmdSerialNum}
 		reply := GetReply{}
-		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
+		ok := ck.servers[ck.leaderId].Call("KVServer.Get", &args, &reply)
 		if ok {
 			if reply.WrongLeader {
-				i = (i + 1) % len(ck.servers)
+				ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 				continue
 			} else {
-				ck.leaderId = i
 				if reply.Err == OK {
 					resp <- reply.Value
 				} else {
@@ -76,7 +74,7 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 				return
 			}
 		} else {
-			i = (i + 1) % len(ck.servers)
+			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 			continue
 		}
 	}
@@ -95,7 +93,7 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
 	respChan := make(chan bool, 200)
-	go ck.SendPutAppend(key, value, op, respChan)
+	ck.SendPutAppend(key, value, op, respChan)
 	ok := <-respChan
 	DPrintf("[*%s*, {%s, %s}][%t]\n", op, key, value, ok)
 	if ok {
@@ -104,23 +102,21 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 }
 
 func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bool) {
-	i := ck.leaderId
 	ck.nextCmdSerialNum++
 	for {
 		args := PutAppendArgs{key, value, op, ck.Id, ck.nextCmdSerialNum}
 		reply := PutAppendReply{}
-		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
+		ok := ck.servers[ck.leaderId].Call("KVServer.PutAppend", &args, &reply)
 		if ok {
 			if reply.WrongLeader {
-				i = (i + 1) % len(ck.servers)
+				ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 				continue
 			} else {
-				ck.leaderId = i
 				resp <- true
 				return
 			}
 		} else {
-			i = (i + 1) % len(ck.servers)
+			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
 			continue
 		}
 	}
