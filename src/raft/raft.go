@@ -752,11 +752,12 @@ func (rf *Raft) OrderInstallSnapshot(i int) {
 		rf.persister.ReadSnapshot(),
 	}
 
-	go func(server int, args *InstallSnapshotArgs) {
-		reply := InstallSnapshotReply{-1}
-		resp := rf.sendInstallSnapshot(server, args, &reply)
+	go func(server int, args InstallSnapshotArgs) {
+		reply := InstallSnapshotReply{}
+		resp := rf.sendInstallSnapshot(server, &args, &reply)
 		if resp {
 			rf.mu.Lock()
+			defer rf.mu.Unlock()
 			if rf.state != LEADER {
 				return
 			}
@@ -773,9 +774,9 @@ func (rf *Raft) OrderInstallSnapshot(i int) {
 			rf.matchIndex[server] = args.LastIncludedIndex
 			rf.nextIndex[server] = args.LastIncludedIndex + 1
 			rf.performCommit()
-			rf.mu.Unlock()
+			//rf.mu.Unlock()
 		}
-	}(i, &args)
+	}(i, args)
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
@@ -784,10 +785,11 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-	DPrintf("[%d] Installing Snapshot\n", rf.me)
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if rf.currentTerm > args.Term {
+		DPrintf("[%d] Rej Snapshot from [Term]: %d\n", rf.me, args.Term)
 		reply.Term = rf.currentTerm
 		return
 	}
@@ -799,6 +801,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.heartbeatChan <- true
 		rf.persist()
 	}
+	DPrintf("[%d] Installing Snapshot from [Term]: %d\n", rf.me, args.Term)
+	reply.Term = args.Term
 
 	hasLastIncludedLog := false
 	for i := range rf.logs.Lgs {
@@ -821,7 +825,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.lastApplied = args.LastIncludedIndex
 	rf.heartbeatChan <- true
 
-	DPrintf("[%d] Installing Snapshot Update State Finished\n", rf.me)
+	DPrintf("[%d] Installing Snapshot Update State Finished [Commited I]: %d [Last Applied I]: %d\n", rf.me, rf.commitIndex, rf.lastApplied)
 
 	newAppliedMsg := ApplyMsg{
 		false,
