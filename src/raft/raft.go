@@ -245,12 +245,11 @@ func (rf *Raft) getNextIndex() int {
 	return rf.logs.getLast().Index + 1
 }
 
-func (rf *Raft) dropLog() {
+func (rf *Raft) dropLog(truncIndex int) {
 	//rf.mu.Lock()
 	//defer rf.mu.Unlock()
-	index := rf.lastApplied
-	DPrintf("[%d][Dropping Log]: %d\n", rf.me, rf.lastApplied)
-	rf.logs.dropBefore(index)
+	DPrintf("[%d][Dropping Log]: %d\n", rf.me, truncIndex)
+	rf.logs.dropBefore(truncIndex)
 }
 
 //
@@ -272,9 +271,9 @@ func (rf *Raft) GetSnapshotSize() int {
 	return rf.persister.RaftStateSize()
 }
 
-func (rf *Raft) Snapshot(snapshotData []byte) {
+func (rf *Raft) Snapshot(snapshotData []byte, truncIndex int) {
 	rf.mu.Lock()
-	rf.dropLog()
+	rf.dropLog(truncIndex)
 	rf.persister.SaveStateAndSnapshot(rf.makeRaftPersistData(), snapshotData)
 	rf.mu.Unlock()
 	DPrintf("[%d][Snapshot Fnished]\n", rf.me)
@@ -559,6 +558,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		DPrintf("[%d][Leader Push Commit] commitedI: %d\n", rf.me, rf.commitIndex)
 	}
 	reply.Success = true
+	reply.NextIndex = rf.getLastIndex() + 1
 	//DPrintf("[%d][Copy Log Suc] prevlogindex %d afterappendlength %d \n",
 	//	rf.me, args.PrevLogIndex, len(rf.logs))
 	DPrintf("[%d][Copy Log Suc] [Prev Log Index]: %d [Length After Append]: %d \n",
@@ -602,6 +602,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 //
 
 func (rf *Raft) performCommit() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// DPrintf("[%d][Perform Commit]\n", rf.me)
 	willCommitted := -1
 	//for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
@@ -643,7 +645,7 @@ func (rf *Raft) heartbeat() {
 	} else {
 		// DPrintf("[%d][Sending hb]\n", rf.me)
 	}
-	rf.performCommit()
+	//rf.performCommit()
 	rf.mu.Unlock()
 
 	for i := range rf.peers {
@@ -728,7 +730,7 @@ func (rf *Raft) updatePeerState(peer int, nEntries int, reply *AppendEntriesRepl
 		// not void hb
 		rf.nextIndex[peer] = reply.NextIndex
 		rf.matchIndex[peer] = reply.NextIndex - 1
-		rf.performCommit()
+		go rf.performCommit()
 	} else if !reply.Success {
 		// not match, has been decreased
 		rf.nextIndex[peer] = reply.NextIndex
@@ -779,7 +781,7 @@ func (rf *Raft) OrderInstallSnapshot(i int) {
 			}
 			rf.matchIndex[server] = args.LastIncludedIndex
 			rf.nextIndex[server] = args.LastIncludedIndex + 1
-			rf.performCommit()
+			go rf.performCommit()
 			//rf.mu.Unlock()
 		}
 	}(i, args)

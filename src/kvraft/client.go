@@ -3,6 +3,7 @@ package raftkv
 import (
 	//"go/constant"
 	"labrpc"
+	"time"
 )
 import "crypto/rand"
 import "math/big"
@@ -61,10 +62,7 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 		reply := GetReply{}
 		ok := ck.servers[ck.leaderId].Call("KVServer.Get", &args, &reply)
 		if ok {
-			if reply.WrongLeader {
-				ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-				continue
-			} else {
+			if !reply.WrongLeader {
 				if reply.Err == OK {
 					resp <- reply.Value
 				} else {
@@ -73,10 +71,9 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 				//resp <- reply.Value
 				return
 			}
-		} else {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-			continue
 		}
+		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -108,17 +105,13 @@ func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bo
 		reply := PutAppendReply{}
 		ok := ck.servers[ck.leaderId].Call("KVServer.PutAppend", &args, &reply)
 		if ok {
-			if reply.WrongLeader {
-				ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-				continue
-			} else {
+			if !reply.WrongLeader {
 				resp <- true
 				return
 			}
-		} else {
-			ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-			continue
 		}
+		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+		time.Sleep(time.Millisecond * 50)
 	}
 }
 

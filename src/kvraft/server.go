@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -187,7 +187,7 @@ func (kv *KVServer) RecvApplied(applied *raft.ApplyMsg) {
 		size := kv.rf.GetSnapshotSize()
 		//DPrintf("[Log Size]: %d\n", size)
 		if size >= kv.maxraftstate && kv.maxraftstate > 0 {
-			kv.rf.Snapshot(kv.makeSnapshotData())
+			kv.rf.Snapshot(kv.makeSnapshotData(), applied.CommandIndex)
 		}
 		kv.mu.Unlock()
 	} else {
@@ -203,20 +203,6 @@ func (kv *KVServer) makeSnapshotData() []byte {
 	e.Encode(kv.executed)
 	data := w.Bytes()
 	return data
-}
-
-func (kv *KVServer) SurveillanceLogSize() {
-	for kv.maxraftstate > 0 {
-		kv.mu.Lock()
-		size := kv.rf.GetSnapshotSize()
-		//DPrintf("[Log Size]: %d\n", size)
-		if size >= kv.maxraftstate {
-			kv.rf.Snapshot(kv.makeSnapshotData())
-		}
-		kv.mu.Unlock()
-		time.Sleep(time.Duration(1 * time.Second))
-	}
-
 }
 
 //
