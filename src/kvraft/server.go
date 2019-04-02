@@ -164,17 +164,17 @@ func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var db map[string]string
-	var waitings map[int][]WOp
+	//var waitings map[int][]WOp
 	var executed map[int64]int
 	if d.Decode(&db) != nil ||
-		d.Decode(&waitings) != nil ||
+		//d.Decode(&waitings) != nil ||
 		d.Decode(&executed) != nil {
 		DPrintf("[Decode Error]\n")
 	} else {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 		kv.db = db
-		kv.waitings = waitings
+		//kv.waitings = waitings
 		kv.executed = executed
 	}
 	//kv.rf.Snapshot(kv.makeSnapshotData())
