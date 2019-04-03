@@ -73,7 +73,7 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 			}
 		}
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -111,7 +111,7 @@ func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bo
 			}
 		}
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(time.Millisecond * 50)
+		time.Sleep(time.Millisecond * 200)
 	}
 }
 

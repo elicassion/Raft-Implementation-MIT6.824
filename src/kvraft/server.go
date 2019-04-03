@@ -50,7 +50,7 @@ type KVServer struct {
 	// Your definitions here.
 	lastPerformedIndex int
 	db                 map[string]string
-	waitings           map[int][]WOp
+	waitings           map[int]chan Op
 	executed           map[int64]int
 }
 
@@ -87,26 +87,27 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *KVServer) PerformOp(op Op) bool {
-	index, term, ok := kv.rf.Start(op)
+	index, _, ok := kv.rf.Start(op)
 	if !ok {
 		return true
 	} else {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
-		completeChan := make(chan bool, 1)
+		completeChan := make(chan Op, 1)
 		kv.mu.Lock()
-		kv.waitings[index] = append(kv.waitings[index], WOp{op, completeChan, term})
+		kv.waitings[index] = completeChan
 		kv.mu.Unlock()
 
-		var complete bool
+		var cOp Op
 		select {
-		case complete = <-completeChan:
+		case cOp = <-completeChan:
+			return !(cOp.SerialNum == op.SerialNum && cOp.ClientId == op.ClientId)
 		case <-time.After(RAFT_COMMIT_TIMEOUT):
-			complete = false
+			kv.mu.Lock()
+			delete(kv.waitings, index)
+			kv.mu.Unlock()
+			return true
 		}
-		kv.mu.Lock()
-		delete(kv.waitings, index)
-		kv.mu.Unlock()
-		return !complete
+		return false
 	}
 }
 
@@ -117,11 +118,8 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 	cmdIndex := applied.CommandIndex
 	oriV, hasKey := kv.db[op.Key]
 	lastExe, seenClient := kv.executed[op.ClientId]
-	if !seenClient {
-		kv.executed[op.ClientId] = 0
-		lastExe = 0
-	}
-	if op.SerialNum > lastExe {
+
+	if !seenClient || (seenClient && op.SerialNum > lastExe) {
 		DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
 		switch op.Type {
 		case "Put":
@@ -139,19 +137,24 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 		}
 		kv.executed[op.ClientId] = op.SerialNum
 	}
-
-	if kv.waitings[cmdIndex] != nil {
-		wOpList := kv.waitings[cmdIndex]
-		for i := range wOpList {
-			if op.ClientId == wOpList[i].Op.ClientId && op.SerialNum == wOpList[i].Op.SerialNum {
-				kv.waitings[cmdIndex][i].Complete <- true
-			} else {
-				kv.waitings[cmdIndex][i].Complete <- false
-			}
-		}
-	} else {
-		return
+	completeCh, hasChan := kv.waitings[cmdIndex]
+	if hasChan {
+		delete(kv.waitings, cmdIndex)
+		completeCh <- op
 	}
+
+	//if kv.waitings[cmdIndex] != nil {
+	//	wOpList := kv.waitings[cmdIndex]
+	//	for i := range wOpList {
+	//		if op.ClientId == wOpList[i].Op.ClientId && op.SerialNum == wOpList[i].Op.SerialNum {
+	//			kv.waitings[cmdIndex][i].Complete <- true
+	//		} else {
+	//			kv.waitings[cmdIndex][i].Complete <- false
+	//		}
+	//	}
+	//} else {
+	//	return
+	//}
 }
 
 func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
@@ -186,7 +189,7 @@ func (kv *KVServer) RecvApplied(applied *raft.ApplyMsg) {
 		kv.mu.Lock()
 		size := kv.rf.GetSnapshotSize()
 		//DPrintf("[Log Size]: %d\n", size)
-		if size >= kv.maxraftstate && kv.maxraftstate > 0 {
+		if size >= int(float32(kv.maxraftstate)*1.5) && kv.maxraftstate > 0 {
 			kv.rf.Snapshot(kv.makeSnapshotData(), applied.CommandIndex)
 		}
 		kv.mu.Unlock()
@@ -241,20 +244,27 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
-	kv.applyCh = make(chan raft.ApplyMsg, 1)
+	kv.applyCh = make(chan raft.ApplyMsg, 1000)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 	kv.db = make(map[string]string)
-	kv.waitings = make(map[int][]WOp)
+	kv.waitings = make(map[int]chan Op)
 	kv.executed = make(map[int64]int)
 	kv.lastPerformedIndex = 0
 
 	go func() {
 		//time.Sleep(1 * time.Second)
-		for applied := range kv.applyCh {
-			kv.RecvApplied(&applied)
+		//go kv.rf.Restore(1)
+		for {
+			select {
+			case applied := <-kv.applyCh:
+				kv.RecvApplied(&applied)
+			}
 		}
+		//for applied := range kv.applyCh {
+		//	kv.RecvApplied(&applied)
+		//}
 	}()
 
 	//go func() {
