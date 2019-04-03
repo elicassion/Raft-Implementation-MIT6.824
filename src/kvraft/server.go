@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -52,6 +52,8 @@ type KVServer struct {
 	db                 map[string]string
 	waitings           map[int]chan Op
 	executed           map[int64]int
+
+	killChan chan bool
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -92,7 +94,7 @@ func (kv *KVServer) PerformOp(op Op) bool {
 		return true
 	} else {
 		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
-		completeChan := make(chan Op, 1)
+		completeChan := make(chan Op, 3)
 		kv.mu.Lock()
 		kv.waitings[index] = completeChan
 		kv.mu.Unlock()
@@ -112,11 +114,12 @@ func (kv *KVServer) PerformOp(op Op) bool {
 }
 
 func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+
 	op := applied.Command.(Op)
 	cmdIndex := applied.CommandIndex
-	oriV, hasKey := kv.db[op.Key]
+	//oriV, hasKey := kv.db[op.Key]
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	lastExe, seenClient := kv.executed[op.ClientId]
 
 	if !seenClient || (seenClient && op.SerialNum > lastExe) {
@@ -126,11 +129,11 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 			kv.db[op.Key] = op.Value
 			break
 		case "Append":
-			if hasKey {
-				kv.db[op.Key] = oriV + op.Value
-			} else {
-				kv.db[op.Key] = op.Value
-			}
+			//if hasKey {
+			kv.db[op.Key] += op.Value
+			//} else {
+			//	kv.db[op.Key] = op.Value
+			//}
 			break
 		default:
 			break
@@ -141,6 +144,11 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 	if hasChan {
 		delete(kv.waitings, cmdIndex)
 		completeCh <- op
+	}
+	size := kv.rf.GetSnapshotSize()
+	//DPrintf("[Log Size]: %d\n", size)
+	if size >= int(float32(kv.maxraftstate)*1.5) && kv.maxraftstate > 0 {
+		kv.rf.Snapshot(kv.makeSnapshotData(), applied.CommandIndex)
 	}
 
 	//if kv.waitings[cmdIndex] != nil {
@@ -186,13 +194,6 @@ func (kv *KVServer) InstallSnapshot(applied *raft.ApplyMsg) {
 func (kv *KVServer) RecvApplied(applied *raft.ApplyMsg) {
 	if applied.CommandValid == true {
 		kv.CompleteOp(applied)
-		kv.mu.Lock()
-		size := kv.rf.GetSnapshotSize()
-		//DPrintf("[Log Size]: %d\n", size)
-		if size >= int(float32(kv.maxraftstate)*1.5) && kv.maxraftstate > 0 {
-			kv.rf.Snapshot(kv.makeSnapshotData(), applied.CommandIndex)
-		}
-		kv.mu.Unlock()
 	} else {
 		kv.InstallSnapshot(applied)
 	}
@@ -215,8 +216,11 @@ func (kv *KVServer) makeSnapshotData() []byte {
 // turn off debug output from this instance.
 //
 func (kv *KVServer) Kill() {
+	DPrintf("[%d][Killing KV Server]\n", kv.me)
+	kv.killChan <- true
 	kv.rf.Kill()
 	// Your code here, if desired.
+
 }
 
 //
@@ -251,16 +255,21 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.db = make(map[string]string)
 	kv.waitings = make(map[int]chan Op)
 	kv.executed = make(map[int64]int)
+
+	kv.killChan = make(chan bool, 1000)
 	kv.lastPerformedIndex = 0
 
 	go func() {
 		//time.Sleep(1 * time.Second)
-		//go kv.rf.Restore(1)
+		go kv.rf.Restore(1)
 		for {
 			select {
+			case <-kv.killChan:
+				return
 			case applied := <-kv.applyCh:
 				kv.RecvApplied(&applied)
 			}
+			//time.Sleep(2*time.Millisecond)
 		}
 		//for applied := range kv.applyCh {
 		//	kv.RecvApplied(&applied)
