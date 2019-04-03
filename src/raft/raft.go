@@ -608,7 +608,8 @@ func (rf *Raft) performCommit() {
 	// DPrintf("[%d][Perform Commit]\n", rf.me)
 	willCommitted := -1
 	//for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
-	for i := rf.commitIndex + 1; i <= rf.getLastIndex(); i++ {
+	for i := max(rf.commitIndex, rf.logs.LastSnapshotIndex) + 1; i <= rf.getLastIndex(); i++ {
+		DPrintf("[%d][Perform Commit]Commited Index: %d, LastIncludedIndex: %d, LastIndex: %d\n", rf.me, rf.commitIndex, rf.logs.LastSnapshotIndex, rf.getLastIndex())
 		agreeNum := 1
 		for j := range rf.peers {
 			if j == rf.me {
@@ -979,6 +980,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 	rf.readSnapshot(persister.ReadSnapshot())
+	//TODO: deal with committed index after restart
 	//rf.persist()
 
 	go rf.setTimeouts()
