@@ -51,7 +51,6 @@ func (ck *Clerk) Get(key string) string {
 	respChan := make(chan string, 1000)
 	ck.SendGet(key, respChan)
 	v := <-respChan
-	DPrintf("[*Get*, %s][%v]\n", key, v)
 	return v
 }
 
@@ -64,6 +63,7 @@ func (ck *Clerk) SendGet(key string, resp chan string) {
 		if ok {
 			if !reply.WrongLeader {
 				if reply.Err == OK {
+					DPrintf("[%d][*Get*, %s][%v]\n", ck.leaderId, key, reply.Value)
 					resp <- reply.Value
 				} else {
 					resp <- ""
@@ -92,7 +92,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	respChan := make(chan bool, 1000)
 	ck.SendPutAppend(key, value, op, respChan)
 	ok := <-respChan
-	DPrintf("[*%s*, {%s, %s}][%t]\n", op, key, value, ok)
 	if ok {
 		return
 	}
@@ -107,6 +106,7 @@ func (ck *Clerk) SendPutAppend(key string, value string, op string, resp chan bo
 		if ok {
 			if !reply.WrongLeader {
 				resp <- true
+				DPrintf("[%d][*%s*, {%s, %s}][%t]\n", ck.leaderId, op, key, value, ok)
 				return
 			}
 		}

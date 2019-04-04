@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -93,7 +93,7 @@ func (kv *KVServer) PerformOp(op Op) bool {
 	if !ok {
 		return true
 	} else {
-		DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
+		//DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
 		completeChan := make(chan Op, 3)
 		kv.mu.Lock()
 		kv.waitings[index] = completeChan
@@ -123,7 +123,7 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 	lastExe, seenClient := kv.executed[op.ClientId]
 
 	if !seenClient || (seenClient && op.SerialNum > lastExe) {
-		DPrintf("[Applied][I: %d][*%s* {%s, %s}]\n", cmdIndex, op.Type, op.Key, op.Value)
+		DPrintf("[%d][Applied][I: %d][*%s* {%s, %s}]\n", kv.me, cmdIndex, op.Type, op.Key, op.Value)
 		switch op.Type {
 		case "Put":
 			kv.db[op.Key] = op.Value
@@ -148,6 +148,7 @@ func (kv *KVServer) CompleteOp(applied *raft.ApplyMsg) {
 	size := kv.rf.GetSnapshotSize()
 	//DPrintf("[Log Size]: %d\n", size)
 	if size >= int(float32(kv.maxraftstate)*1.5) && kv.maxraftstate > 0 {
+		DPrintf("[%d][Make Snapshot]\n", kv.me)
 		kv.rf.Snapshot(kv.makeSnapshotData(), applied.CommandIndex)
 	}
 
@@ -217,7 +218,8 @@ func (kv *KVServer) makeSnapshotData() []byte {
 //
 func (kv *KVServer) Kill() {
 	DPrintf("[%d][Killing KV Server]\n", kv.me)
-	kv.killChan <- true
+	//kv.killChan <- true
+	close(kv.killChan)
 	kv.rf.Kill()
 	// Your code here, if desired.
 
@@ -261,7 +263,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	go func() {
 		//time.Sleep(1 * time.Second)
-		go kv.rf.Restore(1)
+		kv.rf.Restore(1)
 		for {
 			select {
 			case <-kv.killChan:
