@@ -132,11 +132,21 @@ func (logs *Logs) dropBefore(i int) {
 	DPrintf("[Log length]: %d [Dropping from]: %d\n", len(logs.Lgs), i)
 	prevLastSnapshotIndex := logs.LastSnapshotIndex
 	DPrintf("[Prev Last Snapshot Index]: %d\n", prevLastSnapshotIndex)
-	logs.LastSnapshotIndex = logs.Lgs[i-prevLastSnapshotIndex].Index
-	logs.LastSnapshotTerm = logs.Lgs[i-prevLastSnapshotIndex].Term
-	logs.LastCommand = logs.Lgs[i-prevLastSnapshotIndex].Command
-	logs.Lgs = logs.Lgs[i-prevLastSnapshotIndex:]
-	//logs.LastSnapshotIndex = logs.LastSnapshotIndex + count
+	//logs.LastSnapshotIndex = logs.Lgs[i-prevLastSnapshotIndex].Index
+	//logs.LastSnapshotTerm = logs.Lgs[i-prevLastSnapshotIndex].Term
+	//logs.LastCommand = logs.Lgs[i-prevLastSnapshotIndex].Command
+	//logs.Lgs = logs.Lgs[i-prevLastSnapshotIndex:]
+	dropPoint := 0
+	for j := range logs.Lgs {
+		if logs.Lgs[j].Index == i {
+			dropPoint = j
+			logs.LastSnapshotIndex = logs.Lgs[j].Index
+			logs.LastSnapshotTerm = logs.Lgs[j].Term
+			logs.LastCommand = logs.Lgs[j].Command
+			break
+		}
+	}
+	logs.Lgs = logs.Lgs[dropPoint:]
 }
 
 type State int
@@ -1014,7 +1024,7 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 		select {
 		case <-rf.commitChan:
 			rf.mu.Lock()
-			entriesToApply := make([]ApplyMsg, 0)
+			//entriesToApply := make([]ApplyMsg, 0)
 			if rf.lastApplied < rf.logs.LastSnapshotIndex {
 				rf.lastApplied = rf.logs.LastSnapshotIndex
 				applyCh <- ApplyMsg{
@@ -1038,15 +1048,16 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 						make([]byte, 0),
 					}
 					//DPrintf("[%d][Applied][Index: %d]\n", rf.me, i)
-					entriesToApply = append(entriesToApply, newAppliedMsg)
+					//entriesToApply = append(entriesToApply, newAppliedMsg)
 					rf.lastApplied = i
+					applyCh <- newAppliedMsg
 				}
 				DPrintf("[%d][Apply Finished][Last Applied: %d][Commit Index: %d][Last Log Index: %d][Last Included Log: %d]\n", rf.me, rf.lastApplied, rf.commitIndex, rf.getLastIndex(), rf.logs.LastSnapshotIndex)
 			}
 			rf.mu.Unlock()
-			for _, msg := range entriesToApply {
-				applyCh <- msg
-			}
+			//for _, msg := range entriesToApply {
+			//	applyCh <- msg
+			//}
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
