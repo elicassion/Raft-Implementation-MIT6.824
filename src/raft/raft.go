@@ -146,7 +146,7 @@ func (logs *Logs) dropBefore(i int) {
 			break
 		}
 	}
-	logs.Lgs = logs.Lgs[dropPoint:]
+	logs.Lgs = append(logs.Lgs[dropPoint:])
 }
 
 type State int
@@ -1034,7 +1034,7 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 					-1,
 					rf.persister.ReadSnapshot(),
 				}
-				rf.persist()
+				//rf.persist()
 			} else if rf.lastApplied < rf.getLastIndex() && rf.lastApplied < rf.commitIndex {
 				DPrintf("[%d][Before Apply][Last Applied: %d][Commit Index: %d][Last Log Index: %d][Last Included Log: %d]\n", rf.me, rf.lastApplied, rf.commitIndex, rf.getLastIndex(), rf.logs.LastSnapshotIndex)
 				for i := rf.lastApplied + 1; i <= rf.commitIndex && i <= rf.getLastIndex(); i++ {
@@ -1055,10 +1055,6 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 				DPrintf("[%d][Apply Finished][Last Applied: %d][Commit Index: %d][Last Log Index: %d][Last Included Log: %d]\n", rf.me, rf.lastApplied, rf.commitIndex, rf.getLastIndex(), rf.logs.LastSnapshotIndex)
 			}
 			rf.mu.Unlock()
-			//for _, msg := range entriesToApply {
-			//	applyCh <- msg
-			//}
-			time.Sleep(5 * time.Millisecond)
 		}
 	}
 }
