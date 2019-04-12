@@ -1003,7 +1003,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-	rf.readSnapshot(persister.ReadSnapshot())
+	//rf.readSnapshot(persister.ReadSnapshot())
 	//TODO: deal with committed index after restart
 	//rf.persist()
 

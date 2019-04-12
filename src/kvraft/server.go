@@ -248,14 +248,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
+	kv.db = make(map[string]string)
+	kv.waitings = make(map[int]chan Op)
+	kv.executed = make(map[int64]int)
+
 	// You may need initialization code here.
 	kv.applyCh = make(chan raft.ApplyMsg, 1000)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
-	kv.db = make(map[string]string)
-	kv.waitings = make(map[int]chan Op)
-	kv.executed = make(map[int64]int)
 
 	kv.killChan = make(chan bool, 1000)
 	kv.lastPerformedIndex = 0
