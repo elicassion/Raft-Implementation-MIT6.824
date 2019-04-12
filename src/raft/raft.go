@@ -102,6 +102,9 @@ func (logs *Logs) appendSingle(l Log) {
 
 func (logs *Logs) slice(start int, end int) []Log {
 	//l := logs.len()
+	if start > end {
+		return make([]Log, 0)
+	}
 	if start < 0 && end >= 0 {
 		if end-logs.LastSnapshotIndex == 0 {
 			return make([]Log, 0)
@@ -1043,13 +1046,13 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 						true,
 						//rf.logs[i].Command,
 						rf.logs.get(i).Command,
-						i,
+						rf.logs.get(i).Index,
 						rf.logs.get(i).Term,
 						make([]byte, 0),
 					}
 					//DPrintf("[%d][Applied][Index: %d]\n", rf.me, i)
 					//entriesToApply = append(entriesToApply, newAppliedMsg)
-					rf.lastApplied = i
+					rf.lastApplied = rf.logs.get(i).Index
 					applyCh <- newAppliedMsg
 				}
 				DPrintf("[%d][Apply Finished][Last Applied: %d][Commit Index: %d][Last Log Index: %d][Last Included Log: %d]\n", rf.me, rf.lastApplied, rf.commitIndex, rf.getLastIndex(), rf.logs.LastSnapshotIndex)
@@ -1060,7 +1063,7 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 }
 
 func (rf *Raft) setTimeouts() {
-	HEARTBEAT_TIMEOUT := time.Duration(160 * time.Millisecond)
+	HEARTBEAT_TIMEOUT := time.Duration(120 * time.Millisecond)
 	// OP_TIMEOUT := time.Duration(1000*1000*1000)
 	for {
 		//timeoutflag := rand.Intn(66)
