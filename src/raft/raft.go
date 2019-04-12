@@ -102,9 +102,9 @@ func (logs *Logs) appendSingle(l Log) {
 
 func (logs *Logs) slice(start int, end int) []Log {
 	//l := logs.len()
-	if start > end {
-		return make([]Log, 0)
-	}
+	//if start >= 0 && end >= 0 && start > end {
+	//	return make([]Log, 0)
+	//}
 	if start < 0 && end >= 0 {
 		if end-logs.LastSnapshotIndex == 0 {
 			return make([]Log, 0)
@@ -1063,7 +1063,7 @@ func (rf *Raft) commitEvent(applyCh chan ApplyMsg) {
 }
 
 func (rf *Raft) setTimeouts() {
-	HEARTBEAT_TIMEOUT := time.Duration(120 * time.Millisecond)
+	HEARTBEAT_TIMEOUT := time.Duration(160 * time.Millisecond)
 	// OP_TIMEOUT := time.Duration(1000*1000*1000)
 	for {
 		//timeoutflag := rand.Intn(66)
@@ -1103,7 +1103,7 @@ func (rf *Raft) setTimeouts() {
 				rf.switchToLeader()
 				// randomly sleep
 			case <-time.After(ELECTION_TIMEOUT):
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 				// DPrintf("[Ele Timeout] %d\n", rf.me)
 				// rf.startElection()
 			}
