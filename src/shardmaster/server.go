@@ -118,6 +118,7 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 }
 
 func (sm *ShardMaster) PerformOp(argType string, args interface{}) bool {
+	DPrintf("[SM] [%s] %v\n", argType, args)
 	index, term, ok := sm.rf.Start(args)
 	if !ok {
 		return true
@@ -147,7 +148,7 @@ func (sm *ShardMaster) PerformOp(argType string, args interface{}) bool {
 }
 
 func (sm *ShardMaster) CompleteOp(applied *raft.ApplyMsg) {
-	completeArgs := wArgs{nil, applied.CommandTerm}
+	completeArgs := wArgs{0, applied.CommandTerm}
 	if args, typeOK := applied.Command.(JoinArgs); typeOK {
 		if sm.executed[args.ClientId] < args.OpSerialNum {
 			sm.doJoin(&args, &completeArgs)
@@ -174,7 +175,37 @@ func (sm *ShardMaster) CompleteOp(applied *raft.ApplyMsg) {
 }
 
 func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
+	newConfig := sm.queryConfig(-1)
+	gids := make([]int, 0)
+	for gid, server := range args.Servers {
+		if s, ok := newConfig.Groups[gid]; ok {
+			newConfig.Groups[gid] = append(s, server...)
+		} else {
+			newConfig.Groups[gid] = append([]string{}, server...)
+			gids = append(gids, gid)
+		}
+	}
+	groupNum := len(args.Servers)
+	// gids := make([]int, groupNum)
+	// i := 0
+	// for k := range args.Servers {
+	// 	gids[i] = k
+	// 	i++
+	// }
 
+	shardsPerGroup := NShards / groupNum
+	for j := 0; j < shardsPerGroup*groupNum; j++ {
+		newConfig.Shards[j] = gids[j/shardsPerGroup]
+	}
+
+	g := 0
+	for k := shardsPerGroup * groupNum; k < NShards; k++ {
+		newConfig.Shards[k] = gids[g%groupNum]
+		g++
+	}
+	newConfig.Num = len(sm.configs)
+	sm.executed[args.ClientId] = args.OpSerialNum
+	sm.configs = append(sm.configs, newConfig)
 }
 
 func (sm *ShardMaster) doLeave(args *LeaveArgs, completeArgs *wArgs) {
@@ -246,6 +277,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.configs[0].Groups = map[int][]string{}
 
 	labgob.Register(wArgs{})
+	labgob.Register(JoinArgs{})
+	labgob.Register(LeaveArgs{})
+	labgob.Register(MoveArgs{})
+	labgob.Register(QueryArgs{})
 	sm.applyCh = make(chan raft.ApplyMsg, 1000)
 	sm.rf = raft.Make(servers, me, persister, sm.applyCh)
 

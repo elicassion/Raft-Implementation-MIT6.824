@@ -513,7 +513,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.NextIndex = rf.getLastIndex() + 1
 	//im a leader, reject
 	//DPrintf("qqqqq\n")
-	DPrintf("[args]%v\n", args)
+	//DPrintf("[args]%v\n", args)
 	if rf.currentTerm > args.Term {
 		// send updated term
 		reply.Term = rf.currentTerm
@@ -723,8 +723,8 @@ func (rf *Raft) heartbeat() {
 		entriesArgs.Entries = append(entriesArgs.Entries, rf.logs.slice(prevLogIndex+1, -1)...)
 		//DPrintf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d, matchIndex: %d \n",
 		//	rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(rf.logs[prevLogIndex+1:]), rf.commitIndex, rf.matchIndex[i])
-		//DPrintf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d, matchIndex: %d \n",
-		//rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(entriesArgs.Entries), rf.commitIndex, rf.matchIndex[i])
+		DPrintf("[%d][HB]->[%d] curTerm: %d, prevLogI: %d, prevLogT: %d, nEntries: %d, cmmittedI: %d, matchIndex: %d \n",
+		rf.me, i, rf.currentTerm, prevLogIndex, prevLogTerm, len(entriesArgs.Entries), rf.commitIndex, rf.matchIndex[i])
 		//copy(entriesArgs.Entries, rf.logs[prevLogIndex+1:])
 		//copy(entriesArgs.Entries, rf.logs.slice(prevLogIndex+1, -1))
 		// DPrintf("[Entries] ")
