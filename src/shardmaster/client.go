@@ -75,7 +75,6 @@ func (ck *Clerk) Join(servers map[int][]string) {
 func (ck *Clerk) Leave(gids []int) {
 	// args := &LeaveArgs{}
 	// Your code here.
-	args.GIDs = gids
 	args := LeaveArgs{gids, ck.Id, ck.nextCmdSerialNum}
 	for {
 		// try each known server.

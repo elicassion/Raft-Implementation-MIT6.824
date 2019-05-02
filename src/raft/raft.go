@@ -512,6 +512,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = false
 	reply.NextIndex = rf.getLastIndex() + 1
 	//im a leader, reject
+	//DPrintf("qqqqq\n")
+	DPrintf("[args]%v\n", args)
 	if rf.currentTerm > args.Term {
 		// send updated term
 		reply.Term = rf.currentTerm

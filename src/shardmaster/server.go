@@ -9,7 +9,7 @@ import "labrpc"
 import "sync"
 import "labgob"
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -19,6 +19,11 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 const RAFT_COMMIT_TIMEOUT = time.Duration(1 * time.Second)
+
+type wArgs struct {
+	Args interface{}
+	Term int
+}
 
 type ShardMaster struct {
 	mu      sync.Mutex
@@ -31,62 +36,59 @@ type ShardMaster struct {
 	configs     []Config // indexed by config num
 	configIndex int
 
-	waitings map[int]chan Op
+	waitings map[int]chan wArgs
 	executed map[int64]int
 
 	killChan chan bool
 }
 
-type Op struct {
-	// Your data here.
-	Type  string // "Put", "Append", "Get"
-	Key   string
-	Value string
-
-	ClientId  int64
-	SerialNum int
-}
-
-func (sm *ShardMaster) AssignShards(args *JoinArgs) {
-	groupNum = len(args.Servers)
-	gids := make([]int, groupNum)
-	i := 0
-	for k := range args.Servers {
-		gids[i] = k
-		i++
-	}
-
-	shardsPerGroup = NShards / groupNum
-	shardsAssign = make([]int, NShards)
-	for j := 0; j < shardsPerGroup*groupNum; j++ {
-		shardsAssign[j] = gids[j/shardsPerGroup]
-	}
-
-	g := 0
-	for k := shardsPerGroup * groupNum; k < NShards; k++ {
-		shardsAssign[k] = gids[g%groupNum]
-		g++
-	}
-	return shardsAssign
-}
+//func (sm *ShardMaster) AssignShards(args *JoinArgs) {
+//	groupNum = len(args.Servers)
+//	gids := make([]int, groupNum)
+//	i := 0
+//	for k := range args.Servers {
+//		gids[i] = k
+//		i++
+//	}
+//
+//	shardsPerGroup = NShards / groupNum
+//	shardsAssign = make([]int, NShards)
+//	for j := 0; j < shardsPerGroup*groupNum; j++ {
+//		shardsAssign[j] = gids[j/shardsPerGroup]
+//	}
+//
+//	g := 0
+//	for k := shardsPerGroup * groupNum; k < NShards; k++ {
+//		shardsAssign[k] = gids[g%groupNum]
+//		g++
+//	}
+//	return shardsAssign
+//}
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
 	// Num    int              // config number
 	// Shards [NShards]int     // shard -> gid
 	// Groups map[int][]string // gid -> servers[]
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	shards = AssignShards(args)
-	// Servers map[int][]string // new GID -> servers mappings
-	op := Op{Type: "Config"}
+	cpyargs := JoinArgs{make(map[int][]string), args.ClientId, args.OpSerialNum}
+	for gid, server := range args.Servers {
+		cpyargs.Servers[gid] = append([]string{}, server...)
+	}
+	if sm.rf != nil {
+		DPrintf("Join\n")
+		reply.WrongLeader = sm.PerformOp("Join", cpyargs)
+		if !reply.WrongLeader {
+			reply.Err = OK
+		}
+	}
 }
 
 func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	// Your code here.
-	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
-	if kv.rf != nil {
-		reply.WrongLeader = sm.PerformOp(op)
+	cpyargs := LeaveArgs{make([]int, 0), args.ClientId, args.OpSerialNum}
+	cpyargs.GIDs = append(cpyargs.GIDs, args.GIDs...)
+	if sm.rf != nil {
+		reply.WrongLeader = sm.PerformOp("Leave", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
@@ -95,9 +97,9 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
-	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
+	cpyargs := MoveArgs{args.Shard, args.GID, args.ClientId, args.OpSerialNum}
 	if sm.rf != nil {
-		reply.WrongLeader = sm.PerformOp(op)
+		reply.WrongLeader = sm.PerformOp("Move", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
@@ -106,30 +108,34 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 
 func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
-	op := Op{Type: args.Op, Key: args.Key, Value: args.Value, ClientId: args.ClientId, SerialNum: args.OpSerialNum}
-	if kv.rf != nil {
-		reply.WrongLeader = sm.PerformOp(op)
+	cpyargs := QueryArgs{args.Num, args.ClientId, args.OpSerialNum}
+	if sm.rf != nil {
+		reply.WrongLeader = sm.PerformOp("Query", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
 	}
 }
 
-func (sm *ShardMaster) PerformOp(op Op) bool {
-	index, _, ok := sm.rf.Start(op)
+func (sm *ShardMaster) PerformOp(argType string, args interface{}) bool {
+	index, term, ok := sm.rf.Start(args)
 	if !ok {
 		return true
 	} else {
 		//DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
-		completeChan := make(chan Op, 3)
+		completeChan := make(chan wArgs, 3)
 		sm.mu.Lock()
 		sm.waitings[index] = completeChan
 		sm.mu.Unlock()
 
-		var cOp Op
+		var wargs wArgs
 		select {
-		case cOp = <-completeChan:
-			return !(cOp.SerialNum == op.SerialNum && cOp.ClientId == op.ClientId)
+		case wargs = <-completeChan:
+			if wargs.Term != term {
+				return true
+			} else {
+				return false
+			}
 		case <-time.After(RAFT_COMMIT_TIMEOUT):
 			sm.mu.Lock()
 			delete(sm.waitings, index)
@@ -138,6 +144,65 @@ func (sm *ShardMaster) PerformOp(op Op) bool {
 		}
 		return false
 	}
+}
+
+func (sm *ShardMaster) CompleteOp(applied *raft.ApplyMsg) {
+	completeArgs := wArgs{nil, applied.CommandTerm}
+	if args, typeOK := applied.Command.(JoinArgs); typeOK {
+		if sm.executed[args.ClientId] < args.OpSerialNum {
+			sm.doJoin(&args, &completeArgs)
+		}
+	} else if args, typeOK := applied.Command.(LeaveArgs); typeOK {
+		if sm.executed[args.ClientId] < args.OpSerialNum {
+			sm.doLeave(&args, &completeArgs)
+		}
+	} else if args, typeOK := applied.Command.(MoveArgs); typeOK {
+		if sm.executed[args.ClientId] < args.OpSerialNum {
+			sm.doMove(&args, &completeArgs)
+		}
+	} else if args, typeOK := applied.Command.(QueryArgs); typeOK {
+		DPrintf("[Query]\n")
+		qConfig := sm.queryConfig(args.Num)
+		completeArgs.Args = qConfig
+	}
+	cmdIndex := applied.CommandIndex
+	completeCh, hasChan := sm.waitings[cmdIndex]
+	if hasChan {
+		delete(sm.waitings, cmdIndex)
+		completeCh <- completeArgs
+	}
+}
+
+func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
+
+}
+
+func (sm *ShardMaster) doLeave(args *LeaveArgs, completeArgs *wArgs) {
+
+}
+
+func (sm *ShardMaster) doMove(args *MoveArgs, completeArgs *wArgs) {
+	lastConfig := sm.queryConfig(len(sm.configs) - 1)
+	lastConfig.Shards[args.Shard] = args.GID
+	lastConfig.Num = len(sm.configs)
+	sm.executed[args.ClientId] = args.OpSerialNum
+	sm.configs = append(sm.configs, lastConfig)
+}
+
+func (sm *ShardMaster) queryConfig(i int) Config {
+	var qIndex int
+	if i < 0 || i >= len(sm.configs) {
+		qIndex = len(sm.configs) - 1
+	} else {
+		qIndex = i
+	}
+	cpyConfig := Config{sm.configs[qIndex].Num,
+		sm.configs[qIndex].Shards,
+		make(map[int][]string)}
+	for gid, servers := range sm.configs[qIndex].Groups {
+		cpyConfig.Groups[gid] = append([]string{}, servers...)
+	}
+	return cpyConfig
 }
 
 //
@@ -161,9 +226,9 @@ func (sm *ShardMaster) RecvApplied(applied *raft.ApplyMsg) {
 	if applied.CommandValid == true {
 		sm.CompleteOp(applied)
 	} else {
-		if msg.Command.(Op).Type == "NEWLEADER" {
-			sm.rf.Start("")
-		}
+		//if applied.Command == "NEWLEADER" {
+		//	sm.rf.Start("")
+		//}
 	}
 }
 
@@ -180,12 +245,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.configs = make([]Config, 1)
 	sm.configs[0].Groups = map[int][]string{}
 
-	labgob.Register(Op{})
+	labgob.Register(wArgs{})
 	sm.applyCh = make(chan raft.ApplyMsg, 1000)
 	sm.rf = raft.Make(servers, me, persister, sm.applyCh)
 
 	// Your code here.
-	sm.waitings = make(map[int]chan Op)
+	sm.waitings = make(map[int]chan wArgs)
 	sm.executed = make(map[int64]int)
 	sm.killChan = make(chan bool, 1000)
 
