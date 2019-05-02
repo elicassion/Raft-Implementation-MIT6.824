@@ -16,16 +16,54 @@ type ShardMaster struct {
 	// Your data here.
 
 	configs []Config // indexed by config num
+	configIndex int
 }
 
 
 type Op struct {
 	// Your data here.
+	Type  string // "Put", "Append", "Get"
+	Key   string
+	Value string
+
+	ClientId  int64
+	SerialNum int
+}
+
+func (sm *ShardMaster) AssignShards(args *JoinArgs){
+	groupNum = len(args.Servers)
+	gids := make([]int, groupNum)
+	i := 0
+	for k := range args.Servers{
+		gids[i] = k
+		i++
+	}
+
+	shardsPerGroup = NShards / groupNum
+	shardsAssign = make([]int, NShards)
+	for j := 0; j < shardsPerGroup * groupNum; j++{
+		shardsAssign[j] = gids[j / shardsPerGroup]
+	}
+
+	g := 0
+	for k := shardsPerGroup * groupNum; k < NShards; k++{
+		shardsAssign[k] = gids[g % groupNum]
+		g++
+	}
+	return shardsAssign
 }
 
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
+	// Num    int              // config number
+	// Shards [NShards]int     // shard -> gid
+	// Groups map[int][]string // gid -> servers[]
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	shards = AssignShards(args)
+	// Servers map[int][]string // new GID -> servers mappings
+	op := Op{Type: "Config"}
 }
 
 func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {

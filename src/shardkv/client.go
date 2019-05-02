@@ -40,6 +40,9 @@ type Clerk struct {
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	leaderId         int
+	nextCmdSerialNum int
+	Id               int64
 }
 
 //
@@ -56,6 +59,9 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.leaderId = 0
+	ck.nextCmdSerialNum = 0
+	ck.Id = nrand()
 	return ck
 }
 
