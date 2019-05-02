@@ -113,6 +113,7 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 		reply.WrongLeader = sm.PerformOp("Query", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
+			reply.Config = sm.queryConfig(args.Num)
 		}
 	}
 }
@@ -185,27 +186,39 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 			gids = append(gids, gid)
 		}
 	}
-	groupNum := len(args.Servers)
+
 	// gids := make([]int, groupNum)
 	// i := 0
 	// for k := range args.Servers {
 	// 	gids[i] = k
 	// 	i++
 	// }
-
-	shardsPerGroup := NShards / groupNum
-	for j := 0; j < shardsPerGroup*groupNum; j++ {
-		newConfig.Shards[j] = gids[j/shardsPerGroup]
+	groupNum := len(newConfig.Groups)
+	if groupNum > NShards {
+		return
+	}
+	if groupNum == 0 {
+		newConfig.Shards = [NShards]int{}
+		newConfig.Num = len(sm.configs)
+		sm.executed[args.ClientId] = args.OpSerialNum
+		sm.configs = append(sm.configs, newConfig)
+		return
+	}
+	if groupNum <= NShards {
+		shardsPerGroup := NShards / groupNum
+		for j := 0; j < shardsPerGroup*groupNum; j++ {
+			newConfig.Shards[j] = gids[j/shardsPerGroup]
+		}
+		g := 0
+		for k := shardsPerGroup * groupNum; k < NShards; k++ {
+			newConfig.Shards[k] = gids[g%groupNum]
+			g++
+		}
+		newConfig.Num = len(sm.configs)
+		sm.executed[args.ClientId] = args.OpSerialNum
+		sm.configs = append(sm.configs, newConfig)
 	}
 
-	g := 0
-	for k := shardsPerGroup * groupNum; k < NShards; k++ {
-		newConfig.Shards[k] = gids[g%groupNum]
-		g++
-	}
-	newConfig.Num = len(sm.configs)
-	sm.executed[args.ClientId] = args.OpSerialNum
-	sm.configs = append(sm.configs, newConfig)
 }
 
 func (sm *ShardMaster) doLeave(args *LeaveArgs, completeArgs *wArgs) {
@@ -233,6 +246,7 @@ func (sm *ShardMaster) queryConfig(i int) Config {
 	for gid, servers := range sm.configs[qIndex].Groups {
 		cpyConfig.Groups[gid] = append([]string{}, servers...)
 	}
+	DPrintf("[Query Config] %v\n", cpyConfig)
 	return cpyConfig
 }
 
