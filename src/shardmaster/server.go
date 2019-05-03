@@ -9,7 +9,7 @@ import "labrpc"
 import "sync"
 import "labgob"
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -18,7 +18,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RAFT_COMMIT_TIMEOUT = time.Duration(2 * time.Second)
+const RAFT_COMMIT_TIMEOUT = time.Duration(1 * time.Second)
 
 type wArgs struct {
 	Args interface{}
