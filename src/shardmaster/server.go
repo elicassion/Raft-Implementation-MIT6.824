@@ -76,7 +76,7 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	}
 	if sm.rf != nil {
 		//DPrintf("Join\n")
-		reply.WrongLeader = sm.PerformOp("Join", cpyargs)
+		reply.WrongLeader, _ = sm.PerformOp("Join", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
@@ -88,7 +88,7 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	cpyargs := LeaveArgs{make([]int, 0), args.ClientId, args.OpSerialNum}
 	cpyargs.GIDs = append(cpyargs.GIDs, args.GIDs...)
 	if sm.rf != nil {
-		reply.WrongLeader = sm.PerformOp("Leave", cpyargs)
+		reply.WrongLeader, _ = sm.PerformOp("Leave", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
@@ -99,7 +99,7 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
 	cpyargs := MoveArgs{args.Shard, args.GID, args.ClientId, args.OpSerialNum}
 	if sm.rf != nil {
-		reply.WrongLeader = sm.PerformOp("Move", cpyargs)
+		reply.WrongLeader, _ = sm.PerformOp("Move", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
 		}
@@ -124,24 +124,26 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 	sm.mu.Unlock()
 	cpyargs := QueryArgs{args.Num, args.ClientId, args.OpSerialNum}
 	if sm.rf != nil {
-		reply.WrongLeader = sm.PerformOp("Query", cpyargs)
+		var returnConfig interface{}
+		reply.WrongLeader, returnConfig = sm.PerformOp("Query", cpyargs)
 		if !reply.WrongLeader {
 			reply.Err = OK
-			reply.Config = sm.queryConfig(args.Num)
-			DPrintf("[Query Config] %v\n", reply.Config)
+			reply.Config = returnConfig.(Config)
+			//reply.Config = sm.queryConfig(args.Num)
+			DPrintf("[%d][Query Config] %v\n", sm.me, reply.Config)
 		}
 	}
 }
 
-func (sm *ShardMaster) PerformOp(argType string, args interface{}) bool {
-	DPrintf("[%d][SM] [%s] %v\n", sm.me, argType, args)
+func (sm *ShardMaster) PerformOp(argType string, args interface{}) (bool, interface{}) {
 	index, term, ok := sm.rf.Start(args)
 	if !ok {
-		return true
+		return true, -1
 	} else {
+		DPrintf("[%d][Perform] [%s] %v\n", sm.me, argType, args)
 		//DPrintf("[%d][Intended][I: %d][*%s* {%s, %s}]\n", kv.me, index, op.Type, op.Key, op.Value)
-		completeChan := make(chan wArgs, 3)
 		sm.mu.Lock()
+		completeChan := make(chan wArgs, 3)
 		sm.waitings[index] = completeChan
 		sm.mu.Unlock()
 
@@ -149,21 +151,22 @@ func (sm *ShardMaster) PerformOp(argType string, args interface{}) bool {
 		select {
 		case wargs = <-completeChan:
 			if wargs.Term != term {
-				return true
+				return true, -1
 			} else {
-				return false
+				return false, wargs.Args
 			}
 		case <-time.After(RAFT_COMMIT_TIMEOUT):
 			sm.mu.Lock()
 			delete(sm.waitings, index)
 			sm.mu.Unlock()
-			return true
+			return true, -1
 		}
-		return false
+		return false, wargs.Args
 	}
 }
 
 func (sm *ShardMaster) CompleteOp(applied *raft.ApplyMsg) {
+	DPrintf("[%d][Complete] %v\n", sm.me, applied.Command)
 	completeArgs := wArgs{0, applied.CommandTerm}
 	if args, typeOK := applied.Command.(JoinArgs); typeOK {
 		if sm.executed[args.ClientId] < args.OpSerialNum {
@@ -182,11 +185,12 @@ func (sm *ShardMaster) CompleteOp(applied *raft.ApplyMsg) {
 		qConfig := sm.queryConfig(args.Num)
 		completeArgs.Args = qConfig
 	}
+	DPrintf("[%d][Last Config] %v\n", sm.me, sm.queryConfig(-1))
 	cmdIndex := applied.CommandIndex
 	completeCh, hasChan := sm.waitings[cmdIndex]
 	if hasChan {
-		delete(sm.waitings, cmdIndex)
 		completeCh <- completeArgs
+		delete(sm.waitings, cmdIndex)
 	}
 }
 
@@ -208,19 +212,16 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 		gids[i] = k
 		i++
 	}
-	if groupNum > NShards {
-		return
-	}
 	if groupNum == 0 {
 		newConfig.Shards = [NShards]int{}
 		newConfig.Num = len(sm.configs)
 		sm.executed[args.ClientId] = args.OpSerialNum
 		sm.configs = append(sm.configs, newConfig)
 		return
-	}
-	if groupNum <= NShards {
+	} else if groupNum <= NShards {
 		shardsPerGroup := NShards / groupNum
 		resShards := NShards % groupNum
+		// we can't do the following because we should keep the order of shards
 		// for j := 0; j < shardsPerGroup*groupNum; j++ {
 		// 	newConfig.Shards[j] = gids[j/shardsPerGroup]
 		// }
@@ -234,7 +235,7 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 		for i := 0; i < NShards; i++ {
 			gid := newConfig.Shards[i]
 			// group shards are full
-			if gid == 0 || shardsPerGroup == assignedShardsNum[gid] && resShards < 0 ||
+			if gid == 0 || shardsPerGroup == assignedShardsNum[gid] && resShards <= 0 ||
 				assignedShardsNum[gid] == shardsPerGroup+1 {
 				assignGid := newGIDs[newGIDIdx]
 				newConfig.Shards[i] = assignGid
@@ -253,32 +254,61 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 		sm.executed[args.ClientId] = args.OpSerialNum
 		sm.configs = append(sm.configs, newConfig)
 	}
+	for gid, _ := range args.Servers {
+		_, ok := newConfig.Groups[gid]
+		DPrintf("[%d][Join successed?] %v\n", sm.me, ok)
+	}
 
 }
 
 func (sm *ShardMaster) doLeave(args *LeaveArgs, completeArgs *wArgs) {
 	newConfig := sm.queryConfig(-1)
-	// leaveGIDs := make(map[int]struct{})
+	leaveGIDs := make(map[int]bool)
 	for _, gid := range args.GIDs {
+		leaveGIDs[gid] = true
 		delete(newConfig.Groups, gid)
-		// leaveGIDs[gid] = struct{}{}
+	}
+	groupNum := len(newConfig.Groups)
+	resGIDs := make([]int, 0)
+	for gid := range newConfig.Groups {
+		resGIDs = append(resGIDs, gid)
 	}
 	if len(newConfig.Groups) == 0 {
 		newConfig.Shards = [NShards]int{}
 	} else {
-		groupNum := len(newConfig.Groups)
-		restGIDs := make([]int, 0)
-		for gid := range newConfig.Groups {
-			restGIDs = append(restGIDs, gid)
-		}
 		shardsPerGroup := NShards / groupNum
-		for j := 0; j < shardsPerGroup*groupNum; j++ {
-			newConfig.Shards[j] = restGIDs[j/shardsPerGroup]
+		if shardsPerGroup < 1 {
+			shardsPerGroup = 1
 		}
-		g := 0
-		for k := shardsPerGroup * groupNum; k < NShards; k++ {
-			newConfig.Shards[k] = restGIDs[g%groupNum]
-			g++
+		assignedShardsNum := make(map[int]int)
+		resGIDIdx := 0
+		for i := 0; i < NShards; i++ {
+			findAnother := false
+			gid := newConfig.Shards[i]
+			_, ifGIDExists := leaveGIDs[gid]
+			// leave or full
+			if ifGIDExists || assignedShardsNum[gid] == shardsPerGroup {
+				for _, anotherGID := range resGIDs {
+					assigned := assignedShardsNum[anotherGID]
+					if assigned < shardsPerGroup {
+						newConfig.Shards[i] = anotherGID
+						assignedShardsNum[anotherGID]++
+						findAnother = true
+						break
+					}
+				}
+				if findAnother == true {
+					continue
+				}
+				// all full, assign only at most one more to the rest of each
+				anotherGID := resGIDs[resGIDIdx]
+				resGIDIdx++
+				resGIDIdx %= len(resGIDs)
+				newConfig.Shards[i] = anotherGID
+				assignedShardsNum[anotherGID]++
+			} else {
+				assignedShardsNum[gid]++
+			}
 		}
 	}
 	newConfig.Num = len(sm.configs)
@@ -356,6 +386,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	labgob.Register(LeaveArgs{})
 	labgob.Register(MoveArgs{})
 	labgob.Register(QueryArgs{})
+	labgob.Register(JoinReply{})
+	labgob.Register(LeaveReply{})
+	labgob.Register(MoveReply{})
+	labgob.Register(QueryReply{})
 	sm.applyCh = make(chan raft.ApplyMsg, 1000)
 	sm.rf = raft.Make(servers, me, persister, sm.applyCh)
 
