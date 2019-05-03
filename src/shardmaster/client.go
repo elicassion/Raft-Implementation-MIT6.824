@@ -54,7 +54,7 @@ func (ck *Clerk) Query(num int) Config {
 			return reply.Config
 		}
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -74,7 +74,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		}
 		DPrintf("Wrong Leader.")
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -93,7 +93,7 @@ func (ck *Clerk) Leave(gids []int) {
 			return
 		}
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -112,6 +112,6 @@ func (ck *Clerk) Move(shard int, gid int) {
 			return
 		}
 		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }

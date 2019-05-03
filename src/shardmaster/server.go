@@ -18,7 +18,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RAFT_COMMIT_TIMEOUT = time.Duration(1 * time.Second)
+const RAFT_COMMIT_TIMEOUT = time.Duration(2 * time.Second)
 
 type wArgs struct {
 	Args interface{}
@@ -250,10 +250,10 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 			}
 
 		}
-		newConfig.Num = len(sm.configs)
-		sm.executed[args.ClientId] = args.OpSerialNum
-		sm.configs = append(sm.configs, newConfig)
 	}
+	newConfig.Num = len(sm.configs)
+	sm.executed[args.ClientId] = args.OpSerialNum
+	sm.configs = append(sm.configs, newConfig)
 	for gid, _ := range args.Servers {
 		_, ok := newConfig.Groups[gid]
 		DPrintf("[%d][Join successed?] %v\n", sm.me, ok)
