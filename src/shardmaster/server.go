@@ -114,11 +114,11 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 		return
 	}
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 	if args.Num > 0 && args.Num < len(sm.configs) {
 		reply.Err = OK
 		reply.WrongLeader = false
 		reply.Config = sm.queryConfig(args.Num)
+		sm.mu.Unlock()
 		return
 	}
 	sm.mu.Unlock()
@@ -235,15 +235,15 @@ func (sm *ShardMaster) doJoin(args *JoinArgs, completeArgs *wArgs) {
 			gid := newConfig.Shards[i]
 			// group shards are full
 			if gid == 0 || shardsPerGroup == assignedShardsNum[gid] && resShards < 0 ||
-				assignedShardsNum[gid] == shardsPerGroup + 1{
-					assignGid := newGIDs[newGIDIdx]
-					newConfig.Shards[i] = assignGid
-					assignedShardsNum[assignGid]++
-					newGIDIdx++
-					newGIDIdx = newGIDIdx % len(newGIDs)
+				assignedShardsNum[gid] == shardsPerGroup+1 {
+				assignGid := newGIDs[newGIDIdx]
+				newConfig.Shards[i] = assignGid
+				assignedShardsNum[assignGid]++
+				newGIDIdx++
+				newGIDIdx = newGIDIdx % len(newGIDs)
 			} else {
 				assignedShardsNum[gid]++
-				if assignedShardsNum[gid] == shardsPerGroup{
+				if assignedShardsNum[gid] == shardsPerGroup {
 					resShards--
 				}
 			}
@@ -263,7 +263,7 @@ func (sm *ShardMaster) doLeave(args *LeaveArgs, completeArgs *wArgs) {
 		delete(newConfig.Groups, gid)
 		// leaveGIDs[gid] = struct{}{}
 	}
-	if len(newConfig.Groups) == 0{
+	if len(newConfig.Groups) == 0 {
 		newConfig.Shards = [NShards]int{}
 	} else {
 		groupNum := len(newConfig.Groups)
