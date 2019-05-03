@@ -42,29 +42,6 @@ type ShardMaster struct {
 	killChan chan bool
 }
 
-//func (sm *ShardMaster) AssignShards(args *JoinArgs) {
-//	groupNum = len(args.Servers)
-//	gids := make([]int, groupNum)
-//	i := 0
-//	for k := range args.Servers {
-//		gids[i] = k
-//		i++
-//	}
-//
-//	shardsPerGroup = NShards / groupNum
-//	shardsAssign = make([]int, NShards)
-//	for j := 0; j < shardsPerGroup*groupNum; j++ {
-//		shardsAssign[j] = gids[j/shardsPerGroup]
-//	}
-//
-//	g := 0
-//	for k := shardsPerGroup * groupNum; k < NShards; k++ {
-//		shardsAssign[k] = gids[g%groupNum]
-//		g++
-//	}
-//	return shardsAssign
-//}
-
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
 	// Num    int              // config number
